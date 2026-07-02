@@ -117,7 +117,8 @@ class TestParaboloidLaneC:
         env = await run_plan(plan_yaml, mode="analysis")
         summary = _summary(env)
 
-        _print_comparison("Paraboloid Analysis (Lane C)", lane_a, summary)
+        _print_comparison("Paraboloid Analysis (Lane C)", lane_a, summary,
+                          case="paraboloid_analysis", lane_label="C")
 
         assert summary["f_xy"] == pytest.approx(lane_a["f_xy"], rel=1e-12)
 
@@ -147,7 +148,8 @@ class TestParaboloidLaneC:
         summary = _summary(env)
         f_xy = summary.get("f_xy", summary.get("paraboloid.f_xy"))
 
-        _print_comparison("Paraboloid Optimization (Lane C)", lane_a, summary)
+        _print_comparison("Paraboloid Optimization (Lane C)", lane_a, summary,
+                          case="paraboloid_optimization", lane_label="C")
 
         assert f_xy == pytest.approx(lane_a["f_xy"], rel=1e-4)
 
@@ -183,6 +185,7 @@ class TestOCPCaravanBasicLaneC:
         _print_comparison(
             "OCP Caravan Basic Mission (Lane C)", lane_a, summary,
             keys=["fuel_burn_kg", "OEW_kg", "MTOW_kg"],
+            case="ocp_caravan_basic", lane_label="C",
         )
 
         assert summary["fuel_burn_kg"] == pytest.approx(
@@ -219,6 +222,7 @@ class TestOCPOASCoupledLaneC:
         _print_comparison(
             "OCP+OAS Coupled Mission (Lane C, VLM drag slot)", lane_a, summary,
             keys=["fuel_burn_kg", "OEW_kg", "MTOW_kg"],
+            case="ocp_oas_coupled", lane_label="C",
         )
 
         assert summary["fuel_burn_kg"] == pytest.approx(
@@ -256,7 +260,7 @@ class TestEvtNativeSizingLaneC:
 
         keys = ["sized_mtow_kg", "total_mission_energy_kw_hr", "peak_power_kw"]
         _print_comparison("Native eVTOL Sizing (Lane C)", lane_a, summary,
-                          keys=keys)
+                          keys=keys, case="evt_native_sizing", lane_label="C")
 
         assert summary["converged"] == 1.0
         for k in keys:

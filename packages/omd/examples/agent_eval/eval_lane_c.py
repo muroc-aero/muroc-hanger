@@ -282,13 +282,16 @@ def extract_report(text: str) -> dict:
     raise ValueError(f"No parseable JSON report in agent output:\n{text[-2000:]}")
 
 
-def score_case(case: Case, report: dict, refs: dict[str, dict]) -> bool:
+def score_case(
+    case: Case, report: dict, refs: dict[str, dict],
+) -> tuple[bool, list[dict]]:
     metrics = report.get("metrics", {})
     print(f"\n  {'Metric':<16s} {'Lane A':>18s} {'Agent':>18s} "
           f"{'Rel err':>10s}  Verdict")
     print(f"  {'-' * 16} {'-' * 18} {'-' * 18} {'-' * 10}  {'-' * 7}")
 
     ok = True
+    rows: list[dict] = []
     for m in case.metrics:
         ref = refs[m.lane_a_module][m.lane_a_key]
         got = metrics.get(m.key)
@@ -297,6 +300,9 @@ def score_case(case: Case, report: dict, refs: dict[str, dict]) -> bool:
             ok = ok and not m.required
             print(f"  {m.key:<16s} {ref:>18.10g} {str(got):>18s} "
                   f"{'n/a':>10s}  {verdict} (missing)")
+            rows.append({"key": m.key, "lane_a": float(ref), "agent": None,
+                         "rel_err": None, "rtol": m.rtol,
+                         "required": m.required, "verdict": verdict})
             continue
         rel = abs(got - ref) / max(abs(ref), 1e-30)
         passed = rel <= m.rtol
@@ -304,13 +310,16 @@ def score_case(case: Case, report: dict, refs: dict[str, dict]) -> bool:
         ok = ok and (passed or not m.required)
         print(f"  {m.key:<16s} {ref:>18.10g} {got:>18.10g} "
               f"{rel:>10.2e}  {verdict}")
+        rows.append({"key": m.key, "lane_a": float(ref), "agent": float(got),
+                     "rel_err": rel, "rtol": m.rtol,
+                     "required": m.required, "verdict": verdict})
 
     friction = report.get("friction") or []
     if friction:
         print("\n  Friction log:")
         for item in friction:
             print(f"    - {item}")
-    return ok
+    return ok, rows
 
 
 # ---------------------------------------------------------------------------
@@ -332,10 +341,14 @@ async def main() -> int:
                         help="Keep the temp omd data root for inspection")
     parser.add_argument("--verbose", action="store_true",
                         help="Stream agent text while it works")
+    parser.add_argument("--save-json", type=Path, default=None,
+                        help="Write per-case scored results to this JSON file "
+                             "(consumed by paper/make_tables.py)")
     args = parser.parse_args()
 
     names = list(CASES) if "all" in args.cases else list(dict.fromkeys(args.cases))
     all_ok = True
+    saved: list[dict] = []
 
     for name in names:
         case = CASES[name]
@@ -359,17 +372,30 @@ async def main() -> int:
         except ValueError as exc:
             print(f"  FAIL: {exc}")
             all_ok = False
+            saved.append({"case": name, "model": args.model, "ok": False,
+                          "error": str(exc), "cost_usd": cost, "metrics": []})
             continue
 
         print(f"  plan_id={report.get('plan_id')}  "
               f"run_id={report.get('run_id')}  status={report.get('status')}")
-        ok = score_case(case, report, refs)
+        ok, rows = score_case(case, report, refs)
         all_ok = all_ok and ok
         print(f"\n  Case result: {'PASS' if ok else 'FAIL'}")
+        saved.append({
+            "case": name, "model": args.model, "ok": ok,
+            "plan_id": report.get("plan_id"), "run_id": report.get("run_id"),
+            "status": report.get("status"), "cost_usd": cost,
+            "friction": report.get("friction") or [], "metrics": rows,
+        })
 
         if not args.keep_data:
             import shutil
             shutil.rmtree(tmp, ignore_errors=True)
+
+    if args.save_json:
+        args.save_json.parent.mkdir(parents=True, exist_ok=True)
+        args.save_json.write_text(json.dumps(saved, indent=2) + "\n")
+        print(f"\nSaved scored results to {args.save_json}")
 
     print(f"\n{'=' * 70}\nOverall: {'PASS' if all_ok else 'FAIL'}\n{'=' * 70}")
     return 0 if all_ok else 1
