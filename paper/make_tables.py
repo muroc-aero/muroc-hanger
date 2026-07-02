@@ -1,0 +1,333 @@
+#!/usr/bin/env python
+"""Render the paper's lane-parity and sandboxed-eval tables.
+
+Inputs (all optional except the first):
+  paper/results/lane_parity.jsonl   -- written by paper/run_lanes.py
+  paper/results/lane_c_agent.json   -- written by
+      packages/omd/examples/agent_eval/eval_lane_c.py --save-json
+  ../hangar-evals/results/*_summary.json -- sandboxed local-model evals
+      (override the directory with --evals-dir)
+
+Outputs:
+  paper/tables/lane_parity.{csv,md,tex}
+  paper/tables/sandboxed_evals.{csv,md,tex}   (when eval summaries exist)
+
+Usage (from the repo root):
+
+    uv run python paper/make_tables.py
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import sys
+from pathlib import Path
+
+PAPER_DIR = Path(__file__).resolve().parent
+REPO_ROOT = PAPER_DIR.parent
+RESULTS_DIR = PAPER_DIR / "results"
+TABLES_DIR = PAPER_DIR / "tables"
+DEFAULT_EVALS_DIR = REPO_ROOT.parent / "hangar-evals" / "results"
+
+# Presentation order, short description, and the metrics worth printing
+# for each parity case (case slugs match the `case=` tags in
+# packages/omd/examples/tests/test_parity*.py).
+CASE_INFO: dict[str, dict] = {
+    "paraboloid_analysis": {
+        "title": "Paraboloid analysis",
+        "tools": "OpenMDAO",
+        "metrics": ["x", "y", "f_xy"],
+    },
+    "paraboloid_optimization": {
+        "title": "Paraboloid optimization",
+        "tools": "OpenMDAO/SLSQP",
+        "metrics": ["x", "y", "f_xy"],
+    },
+    "oas_aero_rect": {
+        "title": "Rect wing VLM analysis",
+        "tools": "OAS",
+        "metrics": ["CL", "CD"],
+    },
+    "oas_aerostruct_rect": {
+        "title": "Rect wing aerostructural",
+        "tools": "OAS (tube FEM)",
+        "metrics": ["CL", "CD"],
+    },
+    "ocp_caravan_basic": {
+        "title": "Caravan 3-phase mission",
+        "tools": "OCP",
+        "metrics": ["fuel_burn_kg", "OEW_kg", "MTOW_kg"],
+    },
+    "ocp_caravan_full": {
+        "title": "Caravan full mission (BFL)",
+        "tools": "OCP",
+        "metrics": ["fuel_burn_kg", "OEW_kg", "MTOW_kg"],
+    },
+    "ocp_hybrid_twin": {
+        "title": "King Air series-hybrid mission",
+        "tools": "OCP",
+        "metrics": ["fuel_burn_kg", "OEW_kg", "MTOW_kg"],
+    },
+    "oas_ocp_combined": {
+        "title": "Wing + mission, uncoupled composite",
+        "tools": "OAS + OCP",
+        "metrics": ["wing_CL", "wing_CD", "fuel_burn_kg", "OEW_kg", "MTOW_kg"],
+    },
+    "ocp_oas_coupled": {
+        "title": "Mission w/ VLM drag slot",
+        "tools": "OCP + OAS",
+        "metrics": ["fuel_burn_kg", "OEW_kg", "MTOW_kg"],
+    },
+    "ocp_oas_direct": {
+        "title": "Mission w/ direct-coupled VLM drag",
+        "tools": "OCP + OAS",
+        "metrics": ["fuel_burn_kg", "OEW_kg", "MTOW_kg"],
+    },
+    "ocp_pyc_coupled": {
+        "title": "Mission w/ turbojet surrogate",
+        "tools": "OCP + pyCycle",
+        "metrics": ["fuel_burn_kg", "OEW_kg", "MTOW_kg"],
+    },
+    "pyc_turbojet": {
+        "title": "Turbojet design point",
+        "tools": "pyCycle",
+        "metrics": ["Fn", "TSFC", "OPR"],
+    },
+    "evt_native_sizing": {
+        "title": "Archer Midnight eVTOL sizing",
+        "tools": "evt (native)",
+        "metrics": ["sized_mtow_kg", "total_mission_energy_kw_hr",
+                    "peak_power_kw"],
+    },
+    "ocp_three_tool": {
+        "title": "B738 three-tool mission",
+        "tools": "OCP + OAS + pyCycle",
+        "metrics": ["fuel_burn_kg", "OEW_kg", "MTOW_kg"],
+    },
+}
+
+# Agent-eval case/metric names -> (parity case slug, metric key).
+AGENT_METRIC_MAP: dict[tuple[str, str], tuple[str, str]] = {
+    ("paraboloid", "analysis_f_xy"): ("paraboloid_analysis", "f_xy"),
+    ("paraboloid", "opt_f_xy"): ("paraboloid_optimization", "f_xy"),
+    ("paraboloid", "opt_x"): ("paraboloid_optimization", "x"),
+    ("paraboloid", "opt_y"): ("paraboloid_optimization", "y"),
+}
+for _case in ("ocp_caravan_basic", "ocp_oas_coupled"):
+    for _m in ("fuel_burn_kg", "OEW_kg", "MTOW_kg"):
+        AGENT_METRIC_MAP[(_case, _m)] = (_case, _m)
+for _m in ("sized_mtow_kg", "total_mission_energy_kw_hr", "peak_power_kw"):
+    AGENT_METRIC_MAP[("evt_open_sizing", _m)] = ("evt_native_sizing", _m)
+
+
+def _fmt(v: float | None) -> str:
+    if v is None:
+        return "--"
+    return f"{v:.6g}"
+
+
+def _fmt_rel(ref: float | None, val: float | None) -> str:
+    if ref is None or val is None:
+        return "--"
+    if ref == 0:
+        return "--"
+    rel = abs(val - ref) / abs(ref)
+    return "0" if rel == 0 else f"{rel:.1e}"
+
+
+def load_parity(jsonl_path: Path) -> dict[str, dict]:
+    """case slug -> {"lane_a": {...}, "B": {...}, "C": {...}}."""
+    cases: dict[str, dict] = {}
+    for line in jsonl_path.read_text().splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        entry = cases.setdefault(row["case"], {"lane_a": {}})
+        # Lane A values from later suites overwrite earlier ones; they are
+        # the same reference scripts, so any drift shows up as a rel diff.
+        entry["lane_a"].update(row["lane_a"])
+        entry[row["lane"]] = row["values"]
+    return cases
+
+
+def load_agent(json_path: Path) -> dict[tuple[str, str], dict]:
+    """(case slug, metric) -> {"agent": float, "lane_a": float}."""
+    out: dict[tuple[str, str], dict] = {}
+    for rec in json.loads(json_path.read_text()):
+        for m in rec.get("metrics", []):
+            mapped = AGENT_METRIC_MAP.get((rec["case"], m["key"]))
+            if mapped is None or m.get("agent") is None:
+                continue
+            out[mapped] = {"agent": m["agent"], "lane_a": m["lane_a"]}
+    return out
+
+
+def build_rows(cases: dict, agent: dict) -> tuple[list[str], list[list[str]]]:
+    have_agent = bool(agent)
+    header = ["Example", "Tools", "Metric", "Lane A", "Lane B", "rel diff B",
+              "Lane C (scripted)", "rel diff C"]
+    if have_agent:
+        header += ["Lane C (agent)", "rel diff agent"]
+
+    ordered = [c for c in CASE_INFO if c in cases]
+    ordered += sorted(c for c in cases if c not in CASE_INFO)
+
+    rows: list[list[str]] = []
+    for slug in ordered:
+        info = CASE_INFO.get(slug, {"title": slug, "tools": "", "metrics": None})
+        entry = cases[slug]
+        metrics = info["metrics"] or sorted(entry["lane_a"])
+        first = True
+        for m in metrics:
+            a = entry["lane_a"].get(m)
+            b = entry.get("B", {}).get(m)
+            c = entry.get("C", {}).get(m)
+            if not isinstance(a, (int, float)):
+                continue
+            ag = agent.get((slug, m), {}).get("agent") if have_agent else None
+            if b is None and c is None and ag is None:
+                continue  # input echoed by Lane A only -- nothing to compare
+            row = [
+                info["title"] if first else "",
+                info["tools"] if first else "",
+                m, _fmt(a), _fmt(b), _fmt_rel(a, b), _fmt(c), _fmt_rel(a, c),
+            ]
+            if have_agent:
+                row += [_fmt(ag), _fmt_rel(a, ag)]
+            rows.append(row)
+            first = False
+    return header, rows
+
+
+def write_csv(path: Path, header: list[str], rows: list[list[str]]) -> None:
+    with open(path, "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(header)
+        w.writerows(rows)
+
+
+def write_md(path: Path, header: list[str], rows: list[list[str]],
+             note: str = "") -> None:
+    lines = []
+    if note:
+        lines.append(f"<!-- {note} -->")
+    lines.append("| " + " | ".join(header) + " |")
+    lines.append("|" + "|".join("---" for _ in header) + "|")
+    for r in rows:
+        lines.append("| " + " | ".join(r) + " |")
+    path.write_text("\n".join(lines) + "\n")
+
+
+def write_tex(path: Path, header: list[str], rows: list[list[str]],
+              note: str = "") -> None:
+    def esc(s: str) -> str:
+        return (s.replace("\\", r"\textbackslash{}").replace("_", r"\_")
+                 .replace("%", r"\%").replace("&", r"\&").replace("#", r"\#"))
+
+    colspec = "ll" + "r" * (len(header) - 2)
+    lines = []
+    if note:
+        lines.append(f"% {note}")
+    lines.append(r"\begin{tabular}{" + colspec + "}")
+    lines.append(r"\toprule")
+    lines.append(" & ".join(esc(h) for h in header) + r" \\")
+    lines.append(r"\midrule")
+    for r in rows:
+        if r[0] and lines[-1] != r"\midrule":
+            lines.append(r"\addlinespace")
+        lines.append(" & ".join(esc(c) for c in r) + r" \\")
+    lines.append(r"\bottomrule")
+    lines.append(r"\end{tabular}")
+    path.write_text("\n".join(lines) + "\n")
+
+
+def _median_of(block: dict | None, default: str = "--") -> str:
+    if not isinstance(block, dict) or "median" not in block:
+        return default
+    return f"{block['median']:.3g}"
+
+
+def build_evals_rows(evals_dir: Path) -> tuple[list[str], list[list[str]]]:
+    header = ["Case", "Harness", "Model", "Seeds", "Completed", "Passed",
+              "Valid-call rate (med)", "Turns (med)", "Wall clock s (med)"]
+    latest: dict[tuple, tuple[str, dict]] = {}
+    for path in sorted(evals_dir.glob("*_summary.json")):
+        try:
+            records = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        for rec in records:
+            key = (rec.get("case"), rec.get("harness"), rec.get("model"))
+            latest[key] = (path.name, rec)  # sorted glob -> last wins
+    rows = []
+    for (case, harness, model), (_, rec) in sorted(latest.items()):
+        rows.append([
+            str(case), str(harness), str(model),
+            str(rec.get("n_seeds", "--")),
+            f"{rec.get('n_completed', 0)}/{rec.get('n_seeds', 0)}",
+            f"{rec.get('n_passed', 0)}/{rec.get('n_seeds', 0)}",
+            _median_of(rec.get("valid_call_rate")),
+            _median_of(rec.get("turns")),
+            _median_of(rec.get("wall_clock_s")),
+        ])
+    return header, rows
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--evals-dir", type=Path, default=DEFAULT_EVALS_DIR,
+                        help="hangar-evals results dir with *_summary.json")
+    args = parser.parse_args()
+
+    jsonl = RESULTS_DIR / "lane_parity.jsonl"
+    if not jsonl.exists():
+        print(f"ERROR: {jsonl} not found -- run paper/run_lanes.py first.")
+        return 1
+
+    TABLES_DIR.mkdir(parents=True, exist_ok=True)
+
+    note = ""
+    meta_path = RESULTS_DIR / "lane_parity_meta.json"
+    if meta_path.exists():
+        meta = json.loads(meta_path.read_text())
+        note = (f"generated from {meta.get('results_jsonl')} at "
+                f"{meta.get('timestamp_utc')} (git {meta.get('git_sha')}, "
+                f"pytest exit {meta.get('pytest_exit_code')})")
+
+    agent_path = RESULTS_DIR / "lane_c_agent.json"
+    agent = load_agent(agent_path) if agent_path.exists() else {}
+
+    cases = load_parity(jsonl)
+    header, rows = build_rows(cases, agent)
+    write_csv(TABLES_DIR / "lane_parity.csv", header, rows)
+    write_md(TABLES_DIR / "lane_parity.md", header, rows, note)
+    write_tex(TABLES_DIR / "lane_parity.tex", header, rows, note)
+    print(f"Lane parity table: {len(rows)} metric rows across "
+          f"{len(cases)} cases -> {TABLES_DIR}/lane_parity.{{csv,md,tex}}")
+    if not agent:
+        print("  (no lane_c_agent.json found -- agent columns omitted; "
+              "produce one with eval_lane_c.py --save-json "
+              f"{RESULTS_DIR / 'lane_c_agent.json'})")
+
+    if args.evals_dir.is_dir():
+        eheader, erows = build_evals_rows(args.evals_dir)
+        if erows:
+            write_csv(TABLES_DIR / "sandboxed_evals.csv", eheader, erows)
+            write_md(TABLES_DIR / "sandboxed_evals.md", eheader, erows,
+                     f"source: {args.evals_dir}")
+            write_tex(TABLES_DIR / "sandboxed_evals.tex", eheader, erows,
+                      f"source: {args.evals_dir}")
+            print(f"Sandboxed evals table: {len(erows)} rows -> "
+                  f"{TABLES_DIR}/sandboxed_evals.{{csv,md,tex}}")
+        else:
+            print(f"No *_summary.json records in {args.evals_dir}")
+    else:
+        print(f"hangar-evals results dir not found ({args.evals_dir}) -- "
+              "skipping sandboxed table")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

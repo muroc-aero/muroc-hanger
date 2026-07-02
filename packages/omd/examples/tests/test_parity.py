@@ -10,6 +10,8 @@ Run with -s to see comparison tables in the terminal:
 
 from __future__ import annotations
 
+import json
+import os
 import sys
 from pathlib import Path
 
@@ -21,15 +23,59 @@ from hangar.omd.run import run_plan
 EXAMPLES_DIR = Path(__file__).parent.parent
 
 
+def _record_comparison(
+    case: str,
+    name: str,
+    lane_label: str,
+    lane_a: dict,
+    lane_b: dict,
+    keys: list[str],
+) -> None:
+    """Append a comparison row to $PARITY_RESULTS_JSONL, if set.
+
+    The paper results harness (paper/run_lanes.py) sets this env var to
+    collect lane comparisons from a pytest run without duplicating any
+    of the lane orchestration in the tests.
+    """
+    path = os.environ.get("PARITY_RESULTS_JSONL")
+    if not path:
+        return
+
+    def _clean(d: dict) -> dict:
+        out = {}
+        for k in keys:
+            v = d.get(k)
+            if isinstance(v, (int, float)):
+                out[k] = float(v)
+            elif v is not None:
+                out[k] = str(v)
+        return out
+
+    row = {
+        "case": case,
+        "name": name,
+        "lane": lane_label,
+        "keys": list(keys),
+        "lane_a": _clean(lane_a),
+        "values": _clean(lane_b),
+    }
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row) + "\n")
+
+
 def _print_comparison(
     name: str,
     lane_a: dict,
     lane_b: dict,
     keys: list[str] | None = None,
+    *,
+    case: str | None = None,
+    lane_label: str = "B",
 ) -> None:
     """Print a side-by-side comparison of lane A and lane B results."""
     if keys is None:
         keys = sorted(set(lane_a.keys()) | set(lane_b.keys()))
+    _record_comparison(case or name, name, lane_label, lane_a, lane_b, keys)
 
     print(f"\n{'=' * 60}")
     print(f"  {name}")
@@ -66,7 +112,8 @@ class TestParaboloidParity:
         result = run_plan(out, mode="analysis", recording_level="minimal",
                           db_path=tmp_path / "analysis.db")
 
-        _print_comparison("Paraboloid Analysis", lane_a, result["summary"])
+        _print_comparison("Paraboloid Analysis", lane_a, result["summary"],
+                          case="paraboloid_analysis")
 
         assert result["summary"]["f_xy"] == pytest.approx(lane_a["f_xy"], rel=1e-12)
 
@@ -82,7 +129,8 @@ class TestParaboloidParity:
         result = run_plan(out, mode="optimize", recording_level="minimal",
                           db_path=tmp_path / "analysis.db")
 
-        _print_comparison("Paraboloid Optimization", lane_a, result["summary"])
+        _print_comparison("Paraboloid Optimization", lane_a, result["summary"],
+                          case="paraboloid_optimization")
 
         assert result["summary"]["f_xy"] == pytest.approx(lane_a["f_xy"], rel=1e-4)
 
@@ -103,7 +151,7 @@ class TestOASAeroParity:
                           db_path=tmp_path / "analysis.db")
 
         _print_comparison("OAS Aero Analysis", lane_a, result["summary"],
-                          keys=["CL", "CD"])
+                          keys=["CL", "CD"], case="oas_aero_rect")
 
         assert result["summary"]["CL"] == pytest.approx(lane_a["CL"], rel=1e-6)
         assert result["summary"]["CD"] == pytest.approx(lane_a["CD"], rel=1e-6)
@@ -125,7 +173,7 @@ class TestOASAerostructParity:
                           db_path=tmp_path / "analysis.db")
 
         _print_comparison("OAS Aerostruct Analysis", lane_a, result["summary"],
-                          keys=["CL", "CD"])
+                          keys=["CL", "CD"], case="oas_aerostruct_rect")
 
         assert result["summary"]["CL"] == pytest.approx(lane_a["CL"], rel=1e-6)
         assert result["summary"]["CD"] == pytest.approx(lane_a["CD"], rel=1e-6)
@@ -149,6 +197,7 @@ class TestOCPCaravanBasicParity:
             lane_a,
             result["summary"],
             keys=["fuel_burn_kg", "OEW_kg", "MTOW_kg"],
+            case="ocp_caravan_basic",
         )
 
         assert result["status"] in ("completed", "converged")
@@ -175,6 +224,7 @@ class TestOCPCaravanFullParity:
             lane_a,
             result["summary"],
             keys=["fuel_burn_kg", "OEW_kg", "MTOW_kg"],
+            case="ocp_caravan_full",
         )
 
         assert result["status"] in ("completed", "converged")
@@ -201,6 +251,7 @@ class TestOCPHybridTwinParity:
             lane_a,
             result["summary"],
             keys=["fuel_burn_kg", "OEW_kg", "MTOW_kg"],
+            case="ocp_hybrid_twin",
         )
 
         assert result["status"] in ("completed", "converged")
@@ -238,6 +289,7 @@ class TestOASOCPCombinedParity:
             lane_a,
             lane_b_flat,
             keys=["wing_CL", "wing_CD", "fuel_burn_kg", "OEW_kg", "MTOW_kg"],
+            case="oas_ocp_combined",
         )
 
         assert result["status"] in ("completed", "converged")
@@ -270,6 +322,7 @@ class TestOCPPyCycleCoupledParity:
             lane_a,
             result["summary"],
             keys=["fuel_burn_kg", "OEW_kg", "MTOW_kg"],
+            case="ocp_pyc_coupled",
         )
 
         assert result["status"] in ("completed", "converged")
@@ -298,6 +351,7 @@ class TestPyCycleTurbojetParity:
             lane_a,
             result["summary"],
             keys=["Fn", "TSFC", "OPR"],
+            case="pyc_turbojet",
         )
 
         assert result["summary"]["Fn"] == pytest.approx(lane_a["Fn"], rel=1e-6)
@@ -323,6 +377,7 @@ class TestOCPOASCoupledParity:
             lane_a,
             result["summary"],
             keys=["fuel_burn_kg", "OEW_kg", "MTOW_kg"],
+            case="ocp_oas_coupled",
         )
 
         assert result["status"] in ("completed", "converged")
@@ -352,6 +407,7 @@ class TestOCPOASDirectCoupledParity:
             lane_a,
             result["summary"],
             keys=["fuel_burn_kg", "OEW_kg", "MTOW_kg"],
+            case="ocp_oas_direct",
         )
 
         assert result["status"] in ("completed", "converged")
@@ -377,7 +433,8 @@ class TestEvtNativeSizingParity:
 
         keys = ["sized_mtow_kg", "total_mission_energy_kw_hr", "peak_power_kw"]
         _print_comparison("Native eVTOL Sizing (Archer Midnight)", lane_a,
-                          result["summary"], keys=keys)
+                          result["summary"], keys=keys,
+                          case="evt_native_sizing")
 
         assert result["status"] in ("completed", "converged")
         assert result["summary"]["converged"] == 1.0
@@ -421,6 +478,7 @@ class TestOCPThreeToolParity:
             lane_a,
             result["summary"],
             keys=["fuel_burn_kg", "OEW_kg", "MTOW_kg"],
+            case="ocp_three_tool",
         )
 
         assert result["status"] in ("completed", "converged")
