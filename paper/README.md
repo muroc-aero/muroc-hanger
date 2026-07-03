@@ -55,6 +55,10 @@ reference, and the example is documented as non-physical (see
 the recommended physical replacement). Run with `--include-known-gaps`
 to include it anyway.
 
+The scripted Lane C suite covers every table case (`ocp_pyc_coupled`
+excepted, as above), so the "Lane C (scripted)" column is fully
+populated by a full `run_lanes.py` sweep.
+
 ### 2. Live-agent Lane C column (optional, needs API credentials)
 
 ```bash
@@ -63,6 +67,11 @@ uv run --with claude-agent-sdk \
     --save-json paper/results/lane_c_agent.json
 uv run python paper/make_tables.py          # agent columns appear automatically
 ```
+
+Each agent case runs from the example's `lane_c/*_open.prompt.md`:
+engineering goal and physical inputs only, no component types, config
+keys, or tool-call sequence -- the agent must work the MCP surface out
+for itself (see `packages/omd/examples/agent_eval/README.md`).
 
 ### 3. Sandboxed Lane C (hangar-evals)
 
