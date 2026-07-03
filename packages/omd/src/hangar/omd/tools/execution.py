@@ -117,6 +117,27 @@ async def run_plan(
         "server-side so no tool call can hang forever; pass 0 to disable.",
     ] = None,
     stability: Annotated[bool, "Also compute stability derivatives after analysis (OAS aero plans)"] = False,
+    overrides: Annotated[
+        dict | None,
+        "Per-run plan patches, {dotted.path[selector]: value} (same syntax "
+        "as a study case's 'set' block), applied before materialization.",
+    ] = None,
+    case_id: Annotated[str | None, "Case identifier stamped into the plan metadata and run record"] = None,
+    study_id: Annotated[
+        str | None,
+        "Study identifier; with case_id, renames the effective plan to "
+        "'{study_id}--{case_id}' and groups the run under a study entity.",
+    ] = None,
+    attempt: Annotated[
+        int | None,
+        "Attempt number; with study_id and case_id the run is idempotent "
+        "on (study_id, case_id, attempt) -- a repeat returns the stored result.",
+    ] = None,
+    warm_start_run: Annotated[
+        str | None,
+        "Prior run_id whose final case seeds design_variables[].initial "
+        "(best-effort; cold start when it doesn't resolve).",
+    ] = None,
 ) -> dict:
     """Materialize and run an analysis plan (schema + semantic preflight included).
 
@@ -144,6 +165,11 @@ async def run_plan(
         "timeout_seconds": timeout_seconds,
         "stability": stability,
     }
+    for key, val in (("overrides", overrides), ("case_id", case_id),
+                     ("study_id", study_id), ("attempt", attempt),
+                     ("warm_start_run", warm_start_run)):
+        if val is not None:
+            inputs[key] = val
 
     # Pre-flight: schema + semantic, so typos fail fast with suggestions
     # (parity with `omd-cli run`).
@@ -162,6 +188,10 @@ async def run_plan(
             details={"errors": semantic_errors}, inputs=inputs,
         )
     plan_id = ((plan or {}).get("metadata") or {}).get("id")
+    if study_id and case_id:
+        # Case runs are stored under the stamped case plan id
+        from hangar.omd.run import _case_plan_id
+        plan_id = _case_plan_id(study_id, case_id)
 
     # Server-side timeout safety net: a hung solve (or anything stuck in C
     # code) must never strand an MCP agent on a tool call that never
@@ -178,6 +208,8 @@ async def run_plan(
     result = await asyncio.to_thread(
         _run_plan, path, mode=mode, recording_level=recording_level,
         timeout_seconds=timeout_seconds, compute_stab=stability,
+        overrides=overrides, case_id=case_id, study_id=study_id,
+        attempt=attempt, warm_start_run=warm_start_run,
     )
 
     if result.get("errors"):

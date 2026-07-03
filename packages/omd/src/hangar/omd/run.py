@@ -8,14 +8,18 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import signal
 import threading
 import uuid
 from contextlib import contextmanager
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 
-from hangar.omd.plan_schema import load_and_validate
+import yaml
+
+from hangar.omd.plan_schema import load_and_validate, validate_plan
 from hangar.omd.materializer import materialize, apply_solvers_post_setup
 from hangar.omd.recorder import import_recorder_data
 from hangar.omd.db import (
@@ -25,10 +29,12 @@ from hangar.omd.db import (
     n2_dir,
     record_entity,
     record_activity,
+    record_run_key,
     add_prov_edge,
     project_headline,
     query_entity,
     query_provenance_dag,
+    query_run_key,
     query_run_results,
     resolve_scalar,
 )
@@ -294,6 +300,97 @@ def _wallclock_timeout(seconds: int | None):
         timer.cancel()
 
 
+# Same shape as study_runner._case_plan_id so case plans from the control
+# plane (have-agent) and from run_study land in the same store layout.
+_ID_SAFE_RE = re.compile(r"[^a-zA-Z0-9_.\-]+")
+
+
+def _case_plan_id(study_id: str, case_id: str) -> str:
+    return _ID_SAFE_RE.sub("-", f"{study_id}--{case_id}")
+
+
+def _apply_warm_start(plan: dict, warm_start_run: str) -> list[str]:
+    """Seed design_variables[].initial from a prior run's final case.
+
+    Best-effort by design: a missing donor run or an unresolvable DV name
+    degrades to a cold start (warning), never a failed run -- the caller
+    picks the donor opportunistically (e.g. nearest converged sibling case).
+    Returns the names of the DVs that were seeded.
+    """
+    cases = query_run_results(warm_start_run)
+    if not cases:
+        logger.warning(
+            "warm_start_run %s has no recorded cases; starting cold",
+            warm_start_run)
+        return []
+    final = [c for c in cases if c.get("case_type") == "final"]
+    data = (final[-1] if final else cases[-1]).get("data") or {}
+    seeded: list[str] = []
+    for dv in plan.get("design_variables", []):
+        val = resolve_scalar(data, dv.get("name", ""))
+        if val is not None:
+            dv["initial"] = float(val)
+            seeded.append(dv["name"])
+    if seeded:
+        logger.info("warm start from %s seeded DVs: %s",
+                    warm_start_run, seeded)
+    else:
+        logger.warning(
+            "warm_start_run %s resolved none of the plan's DVs; starting cold",
+            warm_start_run)
+    return seeded
+
+
+def _build_effective_plan(
+    plan: dict,
+    overrides: dict | None,
+    case_id: str | None,
+    study_id: str | None,
+    attempt: int | None,
+    warm_start_run: str | None,
+) -> tuple[dict, list[str]]:
+    """Base plan + overrides + warm start + case metadata stamp.
+
+    Mirrors study_runner._build_case_plan for callers that hold a base
+    plan file and per-case parameters (the have-agent worker) instead of
+    a study.yaml. Returns (effective_plan, seeded_dv_names).
+    """
+    plan = deepcopy(plan)
+    if overrides:
+        from hangar.sdk.study import set_by_path
+        for path_expr, value in overrides.items():
+            set_by_path(plan, path_expr, value)
+    seeded = _apply_warm_start(plan, warm_start_run) if warm_start_run else []
+    if case_id:
+        meta = plan.setdefault("metadata", {})
+        meta["case_id"] = case_id
+        if study_id:
+            meta["study"] = study_id
+            meta["id"] = _case_plan_id(study_id, case_id)
+        if attempt is not None:
+            # Each attempt is its own plan version: retries may differ
+            # (warm starts), and the store keeps every artifact that ran.
+            meta["version"] = int(attempt)
+        meta.pop("content_hash", None)
+        meta.pop("parent_version", None)
+    return plan, seeded
+
+
+def _record_study_membership(run_id: str, study_id: str) -> None:
+    """Group a run under its study entity (partOf), creating it if needed."""
+    study_entity_id = f"study-{study_id}/v1"
+    if query_entity(study_entity_id) is None:
+        record_entity(
+            entity_id=study_entity_id,
+            entity_type="study",
+            created_by="have-agent",
+            plan_id=None,
+            version=1,
+            metadata=json.dumps({"study_id": study_id}),
+        )
+    add_prov_edge("partOf", run_id, study_entity_id)
+
+
 def run_plan(
     plan_path: Path,
     mode: str = "analysis",
@@ -301,6 +398,11 @@ def run_plan(
     db_path: Path | None = None,
     timeout_seconds: int | None = None,
     compute_stab: bool = False,
+    overrides: dict | None = None,
+    case_id: str | None = None,
+    study_id: str | None = None,
+    attempt: int | None = None,
+    warm_start_run: str | None = None,
 ) -> dict:
     """Load, materialize, execute, and record an analysis plan.
 
@@ -311,6 +413,20 @@ def run_plan(
         db_path: Path to analysis DB. If None, uses default.
         timeout_seconds: Wallclock timeout in seconds. If None, uses
             the plan's optimizer.options.timeout_seconds, or no limit.
+        overrides: Plan patches applied before materialization, as
+            {dotted.path[selector]: value} (same syntax as a study case's
+            ``set`` block, e.g. ``components[mission].config.range: 500``).
+        case_id: Case identifier stamped into plan metadata and the run
+            record (control-plane callers).
+        study_id: Study identifier; with case_id it renames the effective
+            plan to ``{study_id}--{case_id}`` and groups the run under a
+            study entity (partOf edge).
+        attempt: Attempt number. When study_id, case_id, and attempt are
+            all given, the run is idempotent on that triple: a repeated
+            invocation returns the stored result of the completed run
+            (marked ``"idempotent": True``) instead of executing again.
+        warm_start_run: Prior run_id whose final case seeds this plan's
+            design_variables[].initial (best-effort; cold start on miss).
 
     Returns:
         Structured result dict with:
@@ -324,6 +440,25 @@ def run_plan(
     # Initialize DB
     init_analysis_db(db_path)
 
+    # Idempotency: same (study_id, case_id, attempt) never executes twice.
+    idem_key = (
+        (study_id, case_id, int(attempt))
+        if study_id and case_id and attempt is not None
+        else None
+    )
+    if idem_key:
+        prior = query_run_key(*idem_key)
+        if prior is not None:
+            logger.info("run_plan: idempotent replay of %s for key %s",
+                        prior["run_id"], idem_key)
+            return {**prior["result"], "idempotent": True}
+
+    def _finish(result: dict) -> dict:
+        """Record the idempotency key once the invocation is terminal."""
+        if idem_key and result.get("run_id"):
+            record_run_key(*idem_key, run_id=result["run_id"], result=result)
+        return result
+
     # Load and validate plan
     plan, errors = load_and_validate(plan_path)
     if errors:
@@ -333,6 +468,28 @@ def run_plan(
             "summary": {},
             "errors": errors,
         }
+
+    # Per-run overrides / case stamping / warm start (control-plane callers)
+    plan_modified = bool(overrides or case_id or warm_start_run)
+    if plan_modified:
+        try:
+            plan, _ = _build_effective_plan(
+                plan, overrides, case_id, study_id, attempt, warm_start_run)
+        except Exception as exc:
+            return {
+                "run_id": None,
+                "status": "failed",
+                "summary": {},
+                "errors": [{"path": "overrides", "message": str(exc)}],
+            }
+        errors = validate_plan(plan)
+        if errors:
+            return {
+                "run_id": None,
+                "status": "failed",
+                "summary": {},
+                "errors": errors,
+            }
 
     # Optimize mode requires a complete optimization spec. The materializer
     # only configures the driver when BOTH design_variables and objective are
@@ -366,7 +523,14 @@ def run_plan(
     # Record plan entity -- ensure plan is always stored in the plan store
     content_hash = plan.get("metadata", {}).get("content_hash")
     store_path = plan_store_dir() / plan_id / f"v{plan_version}.yaml"
-    if not store_path.exists():
+    if plan_modified:
+        # The effective plan differs from the file on disk: store the
+        # patched dict, overwriting so re-runs of a changed case never
+        # leave a stale artifact (parity with study_runner.run_case).
+        store_path.parent.mkdir(parents=True, exist_ok=True)
+        store_path.write_text(yaml.safe_dump(plan, sort_keys=False))
+        logger.info("Wrote effective plan to store: %s", store_path)
+    elif not store_path.exists():
         # Copy plan to the store so the artifact is preserved even if the
         # original file is in a temp directory or gets cleaned up.
         import shutil
@@ -414,8 +578,10 @@ def run_plan(
         status="running",
     )
 
-    # Provenance: activity used plan
+    # Provenance: activity used plan (and the warm-start donor run, if any)
     add_prov_edge("used", activity_id, plan_entity_id)
+    if warm_start_run and query_entity(warm_start_run) is not None:
+        add_prov_edge("used", activity_id, warm_start_run)
 
     # Materialize with persistent recorder path
     rec_dir = recordings_dir()
@@ -428,12 +594,12 @@ def run_plan(
         apply_solvers_post_setup(prob, metadata)
     except Exception as exc:
         _record_failure(activity_id, run_id, plan_id, plan_entity_id, str(exc))
-        return {
+        return _finish({
             "run_id": run_id,
             "status": "failed",
             "summary": {},
             "errors": [{"path": "materialize", "message": str(exc)}],
-        }
+        })
 
     # Resolve timeout: CLI flag > plan YAML > default (none)
     if timeout_seconds is None:
@@ -551,21 +717,21 @@ def run_plan(
         msg = str(exc) or f"Wallclock timeout after {timeout_seconds}s"
         logger.warning("Run %s timed out: %s", run_id, msg)
         _record_failure(activity_id, run_id, plan_id, plan_entity_id, msg)
-        return {
+        return _finish({
             "run_id": run_id,
             "status": "timeout",
             "summary": {},
             "errors": [{"path": "execute", "message": msg}],
-        }
+        })
     except Exception as exc:
         prob.cleanup()
         _record_failure(activity_id, run_id, plan_id, plan_entity_id, str(exc))
-        return {
+        return _finish({
             "run_id": run_id,
             "status": "failed",
             "summary": {},
             "errors": [{"path": "execute", "message": str(exc)}],
-        }
+        })
 
     # Import recorder data
     recorder_path = metadata.get("recorder_path")
@@ -611,6 +777,14 @@ def run_plan(
             slot_name: cfg.get("provider", "")
             for slot_name, cfg in slots_cfg.items()
         }
+    if study_id:
+        run_meta_dict["study_id"] = study_id
+    if case_id:
+        run_meta_dict["case_id"] = case_id
+    if attempt is not None:
+        run_meta_dict["attempt"] = int(attempt)
+    if warm_start_run:
+        run_meta_dict["warm_start_run"] = warm_start_run
     run_metadata = json.dumps(run_meta_dict) if run_meta_dict else None
 
     record_entity(
@@ -622,8 +796,10 @@ def run_plan(
         metadata=run_metadata,
     )
 
-    # Provenance: run wasGeneratedBy execute
+    # Provenance: run wasGeneratedBy execute; group under the study if given
     add_prov_edge("wasGeneratedBy", run_id, activity_id)
+    if study_id:
+        _record_study_membership(run_id, study_id)
 
     # Update activity as completed
     record_activity(
@@ -646,12 +822,12 @@ def run_plan(
     except Exception as exc:
         logger.warning("Failed to render run summary for %s: %s", run_id, exc)
 
-    return {
+    return _finish({
         "run_id": run_id,
         "status": status,
         "summary": summary,
         "errors": [],
-    }
+    })
 
 
 def format_convergence_table(recorder_path: Path) -> str | None:
