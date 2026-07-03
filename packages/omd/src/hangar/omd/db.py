@@ -43,6 +43,7 @@ from hangar.results_reader.db import (  # noqa: F401
     query_entity_index,
     query_plan_ids,
     query_provenance_dag,
+    query_run_key,
     query_run_results,
     resolve_scalar,
 )
@@ -288,6 +289,38 @@ def record_run_case(
         "INSERT INTO run_cases (run_id, iteration, case_type, timestamp, data) "
         "VALUES (?, ?, ?, ?, ?)",
         (run_id, iteration, case_type, _now(), _json_dumps(data)),
+    )
+    conn.commit()
+
+
+def record_run_key(
+    study_id: str,
+    case_id: str,
+    attempt: int,
+    run_id: str,
+    result: dict,
+) -> None:
+    """Record the (study_id, case_id, attempt) -> run mapping for a run.
+
+    Written when a keyed run_plan invocation reaches a terminal status, so
+    a replayed invocation with the same key returns the stored result
+    instead of executing again (see ``query_run_key``). INSERT OR REPLACE:
+    concurrent same-key invocations are the caller's job to prevent
+    (have-agent's claim protocol guarantees one worker per attempt).
+
+    Args:
+        study_id: Control-plane study identifier.
+        case_id: Case identifier within the study.
+        attempt: Attempt number (retries get a fresh attempt, so they re-run).
+        run_id: Run entity ID.
+        result: The run_plan return value to replay on a key hit.
+    """
+    conn = _get_conn()
+    conn.execute(
+        "INSERT OR REPLACE INTO run_keys "
+        "(study_id, case_id, attempt, run_id, result, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (study_id, case_id, int(attempt), run_id, _json_dumps(result), _now()),
     )
     conn.commit()
 

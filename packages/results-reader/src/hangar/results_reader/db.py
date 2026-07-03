@@ -134,6 +134,16 @@ CREATE TABLE IF NOT EXISTS run_cases (
     data TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS run_keys (
+    study_id TEXT NOT NULL,
+    case_id TEXT NOT NULL,
+    attempt INTEGER NOT NULL,
+    run_id TEXT NOT NULL,
+    result TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (study_id, case_id, attempt)
+);
+
 CREATE INDEX IF NOT EXISTS idx_entities_plan ON entities(plan_id);
 CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(entity_type);
 CREATE INDEX IF NOT EXISTS idx_prov_subject ON prov_edges(subject_id);
@@ -298,6 +308,25 @@ def query_run_results(
             "data": data,
         })
     return results
+
+
+def query_run_key(study_id: str, case_id: str, attempt: int) -> dict | None:
+    """Look up a completed run by its (study_id, case_id, attempt) key.
+
+    The key is the control plane's (have-agent) idempotency handle: a run
+    invoked with the same triple must not execute twice. Returns
+    ``{"run_id", "result"}`` where ``result`` is the stored run_plan return
+    value, or None when no invocation with this key has completed.
+    """
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT run_id, result FROM run_keys "
+        "WHERE study_id = ? AND case_id = ? AND attempt = ?",
+        (study_id, case_id, int(attempt)),
+    ).fetchone()
+    if row is None:
+        return None
+    return {"run_id": row["run_id"], "result": json.loads(row["result"])}
 
 
 def query_provenance_dag(plan_id: str) -> dict:
