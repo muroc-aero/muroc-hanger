@@ -190,12 +190,24 @@ def _now() -> str:
 
 
 def _resolve_db_path(db_path: Path | None) -> Path:
-    """Resolve the target DB path from the argument, env var, or default."""
+    """Resolve the target DB path: argument > env var > current > default.
+
+    A no-arg call means "make sure the analysis DB is ready", not "switch
+    to the default": when the module is already pointed at an explicit path
+    (e.g. run_plan(db_path=...)), helpers that call init_analysis_db() with
+    no argument mid-flow (summary render, plot tools) must not re-point it
+    -- that silently splits one logical run across two database files (the
+    run lands in the caller's DB, the idempotency key and summary lookups
+    in the default). The env var still wins over the current path so
+    per-test OMD_DB_PATH isolation keeps working.
+    """
     if db_path is not None:
         return Path(db_path)
     env_path = os.environ.get("OMD_DB_PATH")
     if env_path:
         return Path(env_path)
+    if _db_path is not None:
+        return _db_path
     return Path("hangar_data/omd/analysis.db")
 
 

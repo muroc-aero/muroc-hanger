@@ -49,6 +49,28 @@ class TestInitIdempotence:
         _insert_entity("p/v1", "p")
         assert db.query_entity("p/v1") is not None
 
+    def test_no_arg_keeps_explicit_path(self, tmp_path, monkeypatch):
+        """A no-arg re-init must not re-point an explicitly-set DB.
+
+        run_plan(db_path=...) initializes the DB, then helpers it calls
+        mid-flow (summary render, plot tools) call init_analysis_db() with
+        no argument; re-pointing to the default there split one run across
+        two DB files (run records in the caller's DB, idempotency keys in
+        the default).
+        """
+        monkeypatch.delenv("OMD_DB_PATH", raising=False)
+        path = tmp_path / "explicit.db"
+        db.init_analysis_db(path)
+        db.init_analysis_db()
+        assert db.get_db_path() == path
+
+    def test_env_var_wins_over_current_path(self, tmp_path, monkeypatch):
+        """OMD_DB_PATH re-points a no-arg init (per-test isolation relies on it)."""
+        db.init_analysis_db(tmp_path / "first.db")
+        monkeypatch.setenv("OMD_DB_PATH", str(tmp_path / "second.db"))
+        db.init_analysis_db()
+        assert db.get_db_path() == tmp_path / "second.db"
+
 
 # ---------------------------------------------------------------------------
 # user column + scoping helpers
