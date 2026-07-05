@@ -1,0 +1,175 @@
+% =====================================================================
+%  Hangar provenance — Layer 1: the @capture_tool session-graph ontology
+% ---------------------------------------------------------------------
+%  Standalone TikZ figure. Compile with any modern TeX Live:
+%
+%      pdflatex session-graph-ontology.tex
+%      latexmk -pdf session-graph-ontology.tex     % cropped PDF
+%
+%  Required packages (all ship with a standard TeX Live / MiKTeX):
+%      standalone, tikz (+ libraries below), xcolor
+%
+%  Notation follows W3C PROV (see prov-metamodel-ontology.tex): Entity =
+%  ellipse (soft yellow), Activity = rectangle (soft blue), Agent =
+%  pentagon (soft orange), Session = Bundle (dashed enclosure). Layer 1 is
+%  a *lighter* call/decision trace, not full PROV (doc S5): it is
+%  activity-centric (tool calls + decisions are activities; requirement is
+%  the only entity), most edges are INFERRED from seq order, and the LLM is
+%  NOT a stored first-class agent — hence the agent is drawn dashed/implicit.
+%  The edge labels keep the schema's own names; the legend maps each to its
+%  notional PROV relation.
+%
+%  Recommended paper caption: see session-graph-caption.md
+%
+%  Source of truth for the schema:
+%      packages/sdk/src/hangar/sdk/provenance/db.py      (DDL, 5 tables)
+%      packages/sdk/src/hangar/sdk/provenance/db.py:487  (get_session_graph,
+%                                                          edge inference)
+%      packages/sdk/src/hangar/sdk/provenance/tools.py   (agent-authored tools)
+%      packages/sdk/src/hangar/sdk/provenance/conclusion.py (auto verdicts)
+% =====================================================================
+\documentclass[border=10pt]{standalone}
+
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, shapes.geometric, fit, backgrounds, calc}
+
+% --- palette: muted grayscale base + conventional PROV class colours ---
+\definecolor{ink}{HTML}{1A1A1A}
+\definecolor{edge}{HTML}{404040}
+\definecolor{muted}{HTML}{6B6B6B}
+\definecolor{entfill}{HTML}{FBF3D3}   % PROV entity   — soft yellow
+\definecolor{entline}{HTML}{9C8B33}
+\definecolor{actfill}{HTML}{DDE7F7}   % PROV activity — soft blue
+\definecolor{actline}{HTML}{3F6FB0}
+\definecolor{agtfill}{HTML}{FBE1C0}   % PROV agent    — soft orange
+\definecolor{agtline}{HTML}{BE843A}
+
+% --- in-node text switches (declarations, used inside node braces) ----
+\newcommand{\nhead}{\normalfont\sffamily\bfseries}
+\newcommand{\nattr}{\normalfont\ttfamily\scriptsize\color{muted}}
+
+% --- output size: ONE knob. Rescales the whole figure (shapes + text)
+%     uniformly. Native width is ~8.4in; 0.75 emits ~6.3in so the PDF sits
+%     inside a single-column text block. Set 1.0 for full size, or size it
+%     at include time instead: \includegraphics[width=\linewidth]{...}.
+\newcommand{\figscale}{0.75}
+
+\begin{document}
+\begin{tikzpicture}[
+    scale=\figscale, transform shape,
+    font=\sffamily,
+    >=Stealth,
+    % --- PROV class shapes ------------------------------------------
+    activity/.style={
+        rectangle, rounded corners=1pt, draw=actline, line width=0.9pt,
+        fill=actfill, inner sep=4pt, align=left, text=ink, minimum width=33mm},
+    entity/.style={
+        ellipse, draw=entline, line width=0.9pt, fill=entfill, align=center,
+        text=ink, inner sep=1pt, minimum width=44mm, minimum height=20mm},
+    agent/.style={
+        regular polygon, regular polygon sides=5, draw=agtline, densely dashed,
+        line width=0.9pt, fill=agtfill, text=ink, inner sep=1pt,
+        align=center, minimum width=22mm},
+    % --- edge styles: solid=stored, dashed=inferred, dotted=agent assoc
+    stored/.style={->, draw=ink, line width=1.0pt},
+    inferred/.style={->, draw=muted, dashed, line width=0.9pt},
+    assoc/.style={->, draw=muted, densely dotted, line width=0.7pt},
+    elabel/.style={font=\sffamily\scriptsize\itshape, text=ink,
+                   fill=white, inner sep=1.5pt, align=center},
+]
+
+% ============ agent (implicit — not stored in Layer 1) ==============
+\node[agent, minimum width=18mm] (agent) at (12.7,4.8) {agent\\[-1pt]\nattr (runtime/user)};
+
+% ============ the temporal call / decision trace ====================
+\node[activity] (t1) at (1.0,2.4)
+    {{\nhead ToolCall}\,\nattr(seq $n$)\\[1pt]
+     \nattr call\_id, tool\_name\\
+     \nattr inputs\_json / outputs\_json\\
+     \nattr status, duration\_s};
+
+\node[activity] (d1) at (6.5,2.4)
+    {{\nhead Decision}\\[1pt]
+     \nattr decision\_type\\
+     \nattr reasoning, selected\_action\\
+     \nattr prior\_call\_id, confidence};
+
+\node[activity] (t2) at (12.0,2.4)
+    {{\nhead ToolCall}\,\nattr(seq $n{+}2$)\\[1pt]
+     \nattr call\_id, tool\_name\\
+     \nattr inputs\_json / outputs\_json\\
+     \nattr status, duration\_s};
+
+\node[activity, draw=edge, dash pattern=on 3pt off 2pt] (t3) at (12.0,-1.2)
+    {{\nhead ToolCall}\ \nattr(other tool server)\\[1pt]
+     \nattr call\_id, tool\_name};
+
+\node[entity] (req) at (1.3,-1.4)
+    {{\nhead Requirement}\\[1pt]
+     \nattr path, operator\\
+     \nattr value\_json, label};
+
+\node[activity] (concl) at (7.2,-1.3)
+    {{\nhead Conclusion}\ \nattr(a Decision)\\[1pt]
+     \nattr decision\_type = 'conclusion'\\
+     \nattr metadata\_json: per-req verdict};
+
+% ============ Session = a PROV Bundle (encloses the trace) ==========
+\begin{scope}[on background layer]
+  \node[draw=muted, densely dashed, line width=0.8pt, rounded corners=3pt,
+        fill=muted!4, fit=(t1)(d1)(t2)(t3)(req)(concl),
+        inner sep=10pt] (bundle) {};
+\end{scope}
+\node[anchor=south west, font=\sffamily\bfseries\footnotesize, text=muted]
+      at (bundle.north west)
+      {Session --- a PROV Bundle};
+
+% ============ agent association (dotted; see legend) ================
+\draw[assoc] (agent) to[out=-90,in=60]
+      node[elabel, right, pos=0.55]{wasAssociatedWith} (t2.north east);
+
+% ============ trace edges (labels keep schema names) ================
+\draw[stored]   (t1.east) -- node[elabel, above]{informs} (d1.west);
+\draw[inferred] (d1.east) -- node[elabel, above]{decides} (t2.west);
+\draw[inferred] (t1.south) to[out=-18,in=-162]
+      node[elabel, below]{sequence} (t2.south);
+\draw[stored]   (t2.south) -- node[elabel, right, xshift=1pt]
+      {\shortstack[l]{cross\_tool\\[-1pt]\ttfamily\scriptsize variables\_json}} (t3.north);
+\draw[stored]  (concl.west) -- node[elabel, above, align=center]
+      {satisfies\,/\\violates} (req.east);
+
+% ============ legend: shapes ========================================
+\node[anchor=north west, align=left, font=\sffamily\scriptsize, text=ink,
+      draw=muted, line width=0.5pt, fill=white, rounded corners=2pt,
+      inner sep=6pt] (lshape) at (-5.0,-3.4)
+{\textbf{PROV classes} (shapes)\\[3pt]
+ \tikz\node[entity,minimum width=8mm,minimum height=4.5mm,inner sep=0pt]{};\ Entity — \texttt{requirement}\\[2pt]
+ \tikz\node[activity,minimum width=8mm,minimum height=4.5mm,inner sep=0pt]{};\ Activity — \texttt{tool\_call}, \texttt{decision}, \texttt{conclusion}\\[2pt]
+ \tikz\node[agent,minimum width=7mm,inner sep=0pt]{};\ Agent (implicit — not stored, S5)};
+
+% ============ legend: edges + PROV mapping ==========================
+\node[anchor=north west, align=left, font=\sffamily\scriptsize, text=ink,
+      draw=muted, line width=0.5pt, fill=white, rounded corners=2pt,
+      inner sep=6pt, right=6mm of lshape] (ledge)
+{\textbf{Edges} \footnotesize(schema name $\approx$ PROV relation)\\[3pt]
+ \tikz\draw[stored](0,0)--(0.6,0); \ \textbf{stored}: \texttt{informs}, \texttt{cross\_tool}\ $\approx$ \textit{wasInformedBy};\\
+ \hspace*{1.5em}\texttt{satisfies}\,/\,\texttt{violates} (domain relation)\\[2pt]
+ \tikz\draw[inferred](0,0)--(0.6,0); \ \textbf{inferred} from \texttt{seq}: \texttt{sequence} $\approx$\,\textit{precedes},\\
+ \hspace*{1.5em}\texttt{decides} $\approx$ \textit{wasInformedBy}\\[2pt]
+ \tikz\draw[assoc](0,0)--(0.6,0); \ agent link $\approx$ \textit{wasAssociatedWith}};
+
+% ============ legend: tables / caveat ===============================
+\node[anchor=north west, align=left, font=\sffamily\scriptsize, text=ink,
+      draw=muted, line width=0.5pt, fill=white, rounded corners=2pt,
+      inner sep=6pt, right=6mm of ledge]
+{\textbf{Tables} (\texttt{sdk/provenance/db.py})\\[3pt]
+ \texttt{sessions} $\cdot$ \texttt{tool\_calls} $\cdot$ \texttt{decisions}\\
+ \texttt{cross\_references} $\cdot$ \texttt{requirements}\\[3pt]
+ \textit{Nodes are stored; the Bundle is the}\\
+ \textit{shared \texttt{session\_id} (a foreign key).}\\
+ \textit{Edges are inferred at read time from}\\
+ \textit{each row's monotonic \texttt{seq} order.}};
+
+\end{tikzpicture}
+\end{document}

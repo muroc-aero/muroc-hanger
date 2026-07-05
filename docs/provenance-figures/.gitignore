@@ -1,0 +1,6 @@
+# LaTeX transient build artifacts (the .pdf figures are committed deliverables)
+*.aux
+*.log
+*.out
+*.png
+*.synctex.gz
