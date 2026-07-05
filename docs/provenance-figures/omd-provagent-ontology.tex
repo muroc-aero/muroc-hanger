@@ -1,0 +1,166 @@
+% =====================================================================
+%  Hangar provenance — Layer 2: the omd PROV-Agent artifact ontology
+% ---------------------------------------------------------------------
+%  Standalone TikZ figure. Compile with any modern TeX Live:
+%
+%      pdflatex omd-provagent-ontology.tex
+%      latexmk -pdf omd-provagent-ontology.tex     % cropped PDF
+%
+%  Required packages (all ship with a standard TeX Live / MiKTeX):
+%      standalone, tikz (+ libraries below), xcolor
+%
+%  Visual notation follows W3C PROV (see prov-metamodel-ontology.tex for the
+%  abstract base model): Entity = ellipse (soft yellow), Activity = rectangle
+%  (soft blue), Agent = pentagon (soft orange). This figure is the concrete
+%  instance emitted by ONE omd plan run. Solid edges are PROV relations
+%  (core + PROV-Agent domain); dashed edges are agent associations.
+%
+%  Recommended paper caption: see omd-provagent-caption.md
+%
+%  Source of truth for the schema + vocabulary:
+%      packages/results-reader/src/hangar/results_reader/db.py:46   KNOWN_ENTITY_TYPES
+%      packages/results-reader/src/hangar/results_reader/db.py:73   KNOWN_PROV_RELATIONS
+%      packages/results-reader/src/hangar/results_reader/db.py:98   _DDL (entities/activities/prov_edges)
+%      packages/omd/src/hangar/omd/run.py                           edges emitted per run
+%      packages/omd/src/hangar/omd/provenance.py                    Cytoscape builder + version diff
+%
+%  Node placement is verified collision-free by check_layout.py (key
+%  "omd-provagent"); keep the two in sync if you move nodes.
+% =====================================================================
+\documentclass[border=10pt]{standalone}
+
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, shapes.geometric, fit, backgrounds, calc}
+
+% --- palette: muted grayscale base + conventional PROV class colours ---
+\definecolor{ink}{HTML}{1A1A1A}
+\definecolor{edge}{HTML}{404040}
+\definecolor{muted}{HTML}{6B6B6B}
+\definecolor{entfill}{HTML}{FBF3D3}   % PROV entity   — soft yellow
+\definecolor{entline}{HTML}{9C8B33}
+\definecolor{actfill}{HTML}{DDE7F7}   % PROV activity — soft blue
+\definecolor{actline}{HTML}{3F6FB0}
+\definecolor{agtfill}{HTML}{FBE1C0}   % PROV agent    — soft orange
+\definecolor{agtline}{HTML}{BE843A}
+
+% --- in-node attribute text switch -----------------------------------
+\newcommand{\nattr}{\normalfont\ttfamily\scriptsize\color{muted}}
+
+% --- output size: ONE knob. Rescales the whole figure (shapes + text)
+%     uniformly. Native width is ~8.7in; 0.72 emits ~6.3in so the PDF sits
+%     inside a single-column text block. Set 1.0 for full size, or size it
+%     at include time instead: \includegraphics[width=\linewidth]{...}.
+\newcommand{\figscale}{0.72}
+
+\begin{document}
+\begin{tikzpicture}[
+    scale=\figscale, transform shape,
+    font=\sffamily,
+    >=Stealth,
+    % --- PROV class shapes ------------------------------------------
+    entity/.style={
+        ellipse, draw=entline, line width=0.9pt, fill=entfill,
+        text=ink, align=center, inner sep=2pt, font=\sffamily\small,
+        minimum width=28mm, minimum height=12mm},
+    subent/.style={entity, minimum width=24mm, minimum height=8mm,
+        font=\sffamily\footnotesize},
+    activity/.style={
+        rectangle, draw=actline, line width=0.9pt, fill=actfill,
+        text=ink, align=center, inner sep=3pt, font=\sffamily\small,
+        minimum width=24mm, minimum height=11mm},
+    agent/.style={
+        regular polygon, regular polygon sides=5, draw=agtline,
+        line width=0.9pt, fill=agtfill, text=ink, inner sep=1pt,
+        align=center, font=\sffamily\small, minimum width=22mm},
+    % --- relation edge styles: PROV=dark solid, agent assoc=dashed ---
+    rel/.style={->, line width=0.8pt, draw=edge},
+    agentedge/.style={->, line width=0.7pt, draw=muted, densely dashed},
+    rlab/.style={font=\sffamily\scriptsize\itshape, text=ink,
+                 fill=white, inner sep=1.4pt, align=center},
+]
+
+% ============ agents (top corners) ==================================
+\node[agent] (have) at (2.5,7.4)  {coding\\agent};
+\node[agent] (omd)  at (13.0,7.5) {omd};
+
+% ============ plan lineage (replan) =================================
+\node[entity]   (planA)  at (1.5,4.8)  {plan\\[-1pt]\nattr v($N{-}1$)};
+\node[activity] (replan) at (6.0,4.8)  {replan};
+\node[entity]   (planB)  at (10.5,4.8) {plan v($N$)\\[-1pt]\nattr content\_hash};
+
+\draw[rel] (replan) -- node[rlab,above]{used} (planA);
+\draw[rel] (planB)  -- node[rlab,above]{was\\DerivedFrom} (replan);
+% agent associations (dashed): activity->agent = wasAssociatedWith,
+% entity->agent = wasAttributedTo (see legend)
+\draw[agentedge] (replan.north) to[out=100,in=-120]
+      node[rlab,pos=0.5]{was\\AssociatedWith} (have.south);
+\draw[agentedge] (planB.north)  to[out=80,in=-135]
+      node[rlab,pos=0.42]{was\\AttributedTo} (omd.west);
+
+% ============ plan sub-entities (fan from planB) ====================
+\node[subent] (sd) at (15.5,6.2) {surface\_def};
+\node[subent] (op) at (15.5,5.0) {operating\_point};
+\node[subent] (sc) at (15.5,3.8) {solver\_config};
+\node[subent] (os) at (15.5,2.6) {opt\_setup};
+\foreach \n in {sd,op,sc,os}{\draw[rel] (\n.west) to[out=180,in=20] (planB.east);}
+\node[rlab, text=ink] at (13.0,5.55) {was\\DerivedFrom};
+
+% ============ execution =============================================
+\node[activity] (exec) at (10.5,2.4)  {execute};
+\node[entity]   (run)  at (10.5,-0.1) {run\_record};
+\node[entity, densely dashed, minimum width=28mm, minimum height=9mm]
+      (warm) at (5.5,2.4) {prior run\_record};
+
+\draw[rel] (exec) -- node[rlab,left]{used} (planB);
+\draw[rel] (run)  -- node[rlab,left]{was\\GeneratedBy} (exec);
+\draw[rel] (exec) -- node[rlab,above,align=center]{used\\(warm-start)} (warm);
+\draw[agentedge] (exec.east) to[out=15,in=-80]
+      node[rlab,pos=0.5]{was\\AssociatedWith} (omd.south);
+
+% ============ result entities (fan from run_record) =================
+\node[subent] (aero) at (15.5,1.1)  {aero\_results};
+\node[subent] (strc) at (15.5,-0.1) {struct\_results};
+\node[subent] (conv) at (15.5,-1.3) {convergence\_info};
+\node[subent] (mstr) at (15.5,-2.5) {model\_structure};
+\foreach \n in {aero,strc,conv,mstr}{\draw[rel] (\n.west) to[out=180,in=0] (run.east);}
+\node[rlab, text=ink] at (13.0,-0.1) {was\\DerivedFrom};
+
+% ============ assessment / verification =============================
+\node[activity] (assess) at (6.0,-1.1) {assess};
+\node[entity]   (assmt)  at (6.0,-3.4) {assessment};
+\node[entity]   (req)    at (1.5,-3.4) {requirement};
+\node[entity, minimum width=32mm] (crit) at (1.5,-5.2) {acceptance\\criterion};
+\node[entity, minimum width=22mm, minimum height=9mm] (study) at (10.5,-3.0) {study};
+
+\draw[rel] (assess) -- node[rlab,above,pos=0.55]{used} (run);
+\draw[rel] (assmt)  -- node[rlab,left]{was\\GeneratedBy} (assess);
+\draw[rel] (assmt) -- node[rlab,above,align=center]{verifies\,$\to$\\satisfies\,/\,violates} (req);
+\draw[rel] (req)   -- node[rlab,right]{has\_criterion} (crit);
+\draw[rel] (run.south) to[out=-90,in=90] node[rlab,right]{partOf} (study.north);
+
+% =====================================================================
+%  Vocabulary legend (bottom strip)
+% =====================================================================
+\node[anchor=north west, align=left, font=\sffamily\scriptsize, text=ink,
+      draw=muted, line width=0.5pt, fill=white, rounded corners=2pt,
+      inner sep=6pt] at (-4.2,-6.3)
+{\textbf{entity\_type}\ \footnotesize(\texttt{KNOWN\_ENTITY\_TYPES})\\[2pt]
+ \ttfamily\scriptsize plan $\cdot$ run\_record $\cdot$ assessment $\cdot$ surface\_def $\cdot$ operating\_point $\cdot$ solver\_config $\cdot$ opt\_setup\\
+ \ttfamily\scriptsize aero\_results $\cdot$ struct\_results $\cdot$ convergence\_info $\cdot$ model\_structure $\cdot$ phase $\cdot$ requirement\\
+ \ttfamily\scriptsize acceptance\_criterion $\cdot$ plan\_element $\cdot$ decision $\cdot$ conclusion $\cdot$ study\\[5pt]
+ \textbf{activity\_type}\ \ttfamily\scriptsize execute $\cdot$ assess $\cdot$ replan\qquad
+ \normalfont\textbf{agent}\ \ttfamily\scriptsize omd $\cdot$ coding agent};
+
+\node[anchor=north west, align=left, font=\sffamily\scriptsize, text=ink,
+      draw=muted, line width=0.5pt, fill=white, rounded corners=2pt,
+      inner sep=6pt] at (9.1,-6.3)
+{\textbf{relation}\ \footnotesize(\texttt{KNOWN\_PROV\_RELATIONS})\\[3pt]
+ \tikz\draw[rel](0,0)--(0.55,0);\ PROV core:\ \ttfamily\scriptsize wasGeneratedBy $\cdot$ used $\cdot$ wasDerivedFrom\\
+ \hspace*{4.3em}\ttfamily\scriptsize wasInformedBy\\[2pt]
+ \tikz\draw[rel](0,0)--(0.55,0);\ domain:\ \ttfamily\scriptsize justifies $\cdot$ has\_criterion $\cdot$ verifies $\cdot$ satisfies\\
+ \hspace*{4.3em}\ttfamily\scriptsize violates $\cdot$ precedes $\cdot$ has\_check $\cdot$ executes $\cdot$ partOf\\[2pt]
+ \tikz\draw[agentedge](0,0)--(0.55,0);\ agent:\ \ttfamily\scriptsize wasAssociatedWith $\cdot$ wasAttributedTo};
+
+\end{tikzpicture}
+\end{document}

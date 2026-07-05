@@ -1,0 +1,205 @@
+% =====================================================================
+%  Hangar — the analysis-plan data model (UML class diagram)
+% ---------------------------------------------------------------------
+%  Standalone TikZ figure. Compile with any modern TeX Live:
+%
+%      pdflatex plan-dag-ontology.tex
+%      latexmk -pdf plan-dag-ontology.tex     % cropped PDF
+%
+%  Required packages (all ship with a standard TeX Live / MiKTeX):
+%      standalone, tikz (+ libraries below), xcolor
+%
+%  WHY UML (and not PROV): the analysis plan is a *declarative document* — a
+%  structured data model, not a process or a provenance record. Its lineage
+%  (the plan is one PROV entity, derived/versioned by replan/execute
+%  activities) is the job of Layer 2 (omd-provagent-ontology.tex) and is drawn
+%  there. This figure is the plan's *anatomy*: a UML class diagram (= DoDAF
+%  DIV-2 logical data model). The plan is the composite; each schema section is
+%  a class with a multiplicity; the two genuine embedded graphs become
+%  reflexive associations (Component -connections-> Component, Phase
+%  -depends_on-> Phase); and the traces_to links (design elements ->
+%  requirements) are associations. Class-header tint groups the sections
+%  (model / optimization / intent / process); it carries no formal meaning.
+%  The optimization parts share one composition diamond (UML shared-tree form).
+%
+%  Recommended paper caption: see plan-dag-caption.md
+%
+%  Source of truth for the schema (every class + field below is taken from it):
+%      packages/omd/src/hangar/omd/plan_schema.py     PLAN_SCHEMA (JSON Schema)
+%      packages/omd/src/hangar/omd/materializer.py    plan -> OpenMDAO Problem
+%      packages/omd/src/hangar/omd/plan_graph.py      component/phase graphs
+%
+%  Node placement is verified collision-free by check_layout.py (key
+%  "plan-dag"); keep the two in sync if you move nodes.
+% =====================================================================
+\documentclass[border=10pt]{standalone}
+
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, shapes.multipart, fit, backgrounds, calc}
+
+% --- palette: muted grayscale base + light section tints --------------
+\definecolor{ink}{HTML}{1A1A1A}
+\definecolor{edge}{HTML}{404040}
+\definecolor{muted}{HTML}{6B6B6B}
+\definecolor{mslate}{HTML}{C9D4E0}   % Plan (composite)
+\definecolor{mblue}{HTML}{DCE7F7}    % model / topology
+\definecolor{mamber}{HTML}{FBEFCB}   % optimization problem
+\definecolor{mrose}{HTML}{F6DDD9}    % requirements / intent
+\definecolor{mgray}{HTML}{E4E7EB}    % analysis process
+
+\newcommand{\cn}[1]{\textbf{#1}}                       % class name
+\newcommand{\at}{\ttfamily\scriptsize\color{muted}}    % attribute text
+
+% --- output size: ONE knob. Rescales the whole figure (shapes + text)
+%     uniformly. Native width is ~9.7in; 0.65 emits ~6.3in so the PDF sits
+%     inside a single-column text block. Set 1.0 for full size, or size it
+%     at include time instead: \includegraphics[width=\linewidth]{...}.
+%     This is the densest figure -- it reads best full-width (figure*).
+\newcommand{\figscale}{0.65}
+
+\begin{document}
+\begin{tikzpicture}[
+    scale=\figscale, transform shape,
+    font=\sffamily,
+    >=Stealth,
+    % --- UML class box: name compartment + attribute compartment -----
+    umlclass/.style={
+        rectangle split, rectangle split parts=2, align=left,
+        draw=edge, line width=0.7pt, text=ink, inner sep=3pt,
+        font=\sffamily\scriptsize, minimum width=30mm},
+    plancls/.style={umlclass, line width=1.1pt, font=\sffamily\small,
+        rectangle split part fill={mslate,white}, minimum width=46mm},
+    mdl/.style={umlclass,  rectangle split part fill={mblue,white}},
+    opt/.style={umlclass,  rectangle split part fill={mamber,white}},
+    intent/.style={umlclass, rectangle split part fill={mrose,white}},
+    proc/.style={umlclass, rectangle split part fill={mgray,white}},
+    % --- relationship edges -----------------------------------------
+    comp/.style={draw=edge, line width=0.7pt,
+                 {Diamond[length=5pt,width=3.4pt]}-},   % composition (filled diamond at whole)
+    treeline/.style={draw=edge, line width=0.7pt},      % shared-tree trunk/branch
+    assoc/.style={draw=edge, line width=0.7pt, -{Stealth[length=4pt]}}, % directed association
+    trace/.style={draw=muted, densely dashed, line width=0.8pt,
+                  -{Stealth[length=4pt]}},              % traces_to
+    mult/.style={font=\sffamily\scriptsize, text=muted, inner sep=1.2pt, fill=white},
+    alab/.style={font=\sffamily\scriptsize\itshape, text=ink, fill=white, inner sep=1.4pt, align=center},
+]
+
+% ============ Plan — the composite =================================
+\node[plancls] (plan) at (6.6,8.6)
+    {\cn{Plan}\ \ {\normalfont\scriptsize\itshape (plan.yaml — one artifact)}
+     \nodepart{two}\at metadata: id $\cdot$ name $\cdot$ version\\
+     parent\_version $\cdot$ content\_hash\\ composition\_policy};
+
+% =====================================================================
+%  MODEL / TOPOLOGY  (blue)
+% =====================================================================
+\node[mdl] (comp) at (-1.0,5.8)
+    {\cn{Component}\nodepart{two}\at type \ \color{ink}\itshape «factory»\\
+     {\at id $\cdot$ source}\\ {\at config.slots}};
+\node[mdl] (oppt) at (2.8,5.8)
+    {\cn{OperatingPoints}\nodepart{two}\at\itshape single | multipoint\\
+     {\at flight\_points[\,]}\\ {\at $\alpha \cdot M \cdot Re \cdot v \cdot h$}};
+\node[mdl] (shv) at (0.9,3.3)
+    {\cn{SharedVar}\nodepart{two}\at name $\cdot$ value $\cdot$ units\\
+     consumers[\,]\\ rationale};
+
+% =====================================================================
+%  OPTIMIZATION PROBLEM  (amber) — shared composition tree
+%    left sub-column:  Solver / Constraint / Optimizer
+%    right sub-column: DesignVariable / Objective  (nearest requirements)
+% =====================================================================
+\node[opt] (solv) at (6.0,6.4)
+    {\cn{Solver}\nodepart{two}\at target \ \itshape «scope»\\
+     {\at nonlinear\{type,opts\}}\\ {\at linear\{type,opts\}}};
+\node[opt] (con) at (6.0,4.2)
+    {\cn{Constraint}\nodepart{two}\at name\\
+     upper $\cdot$ lower $\cdot$ equals\\ scaler $\cdot$ point};
+\node[opt] (optm) at (6.0,2.0)
+    {\cn{Optimizer}\nodepart{two}\at type\\ options};
+\node[opt] (dv) at (10.4,5.2)
+    {\cn{DesignVariable}\nodepart{two}\at name\\
+     lower $\cdot$ upper $\cdot$ units\\ scaler $\cdot$ ref $\cdot$ initial};
+\node[opt] (obj) at (10.4,2.9)
+    {\cn{Objective}\nodepart{two}\at name\\ scaler $\cdot$ units};
+
+% =====================================================================
+%  REQUIREMENTS / INTENT  (rose)
+% =====================================================================
+\node[intent] (req) at (14.6,5.8)
+    {\cn{Requirement}\nodepart{two}\at id $\cdot$ text\\
+     type $\cdot$ priority $\cdot$ status\\ verification\{method, assertion\}};
+\node[intent] (crit) at (14.6,3.4)
+    {\cn{AcceptanceCriterion}\nodepart{two}\at metric\\
+     comparator $\cdot$ threshold\\ range $\cdot$ units};
+\node[intent] (dec) at (14.6,1.0)
+    {\cn{Decision}\nodepart{two}\at stage $\cdot$ agent\\
+     reason $\cdot$ rationale\\ references[\,]\\ alternatives\_considered[\,]};
+
+% =====================================================================
+%  ANALYSIS PROCESS  (gray)
+% =====================================================================
+\node[proc] (ap) at (6.6,-0.9)
+    {\cn{AnalysisPlan}\nodepart{two}\at strategy\\ replan\_triggers[\,]};
+\node[proc] (ph) at (6.6,-3.1)
+    {\cn{Phase}\nodepart{two}\at id $\cdot$ mode\\
+     success\_criteria[\,]\\ checks[\,] \ {\itshape plot|assertion|}\\ range\_safety|manual};
+
+% =====================================================================
+%  composition — Plan owns each section
+% =====================================================================
+\draw[comp] (plan.west)       -- node[mult,pos=0.85]{1..*} (comp.north);
+\draw[comp] (plan.south west) to[out=-120,in=70] node[mult,pos=0.9]{0..1} (oppt.north);
+\draw[comp] (plan.south west) -- (0.9,7.1) -- node[mult,pos=0.85]{0..*} (shv.north);
+\draw[comp] (plan.east)       to[out=5,in=120]  node[mult,pos=0.9]{0..*} (req.north);
+\draw[comp] (plan.east)       to[out=-22,in=70] node[mult,pos=0.95]{0..*} (dec.north east);
+% nested composition
+\draw[comp] (req.south) -- node[mult,pos=0.78]{0..*} (crit.north);
+\draw[comp] (ap.south)  -- node[mult,pos=0.8]{0..*}  (ph.north);
+% AnalysisPlan hung from Plan down the central corridor
+\draw[comp] (plan.south) -- (7.9,7.2) -- (7.9,0.1) -- node[mult,pos=0.75]{0..1} (ap.north east);
+
+% optimization: one composition diamond -> shared tree (trunk at x=8.2)
+\draw[comp]     (plan.south) -- (8.2,7.2);
+\draw[treeline] (8.2,7.2) -- (8.2,2.0);
+\draw[treeline] (8.2,6.4) -- node[mult,pos=0.5,above]{0..*} (solv.east);
+\draw[treeline] (8.2,4.2) -- node[mult,pos=0.5,above]{0..*} (con.east);
+\draw[treeline] (8.2,2.0) -- node[mult,pos=0.5,above]{0..1} (optm.east);
+\draw[treeline] (8.2,5.2) -- node[mult,pos=0.5,above]{0..*} (dv.west);
+\draw[treeline] (8.2,2.9) -- node[mult,pos=0.5,above]{0..1} (obj.west);
+
+% =====================================================================
+%  associations: the two embedded graphs + traceability + consumers
+% =====================================================================
+% Component connection graph (reflexive)
+\draw[assoc] (comp.north west) to[out=150,in=210,looseness=7]
+      node[alab,left]{connections\\[-1pt]{\at src$\to$tgt}} (comp.south west);
+% Phase dependency DAG (reflexive)
+\draw[assoc] (ph.south east) to[out=-40,in=40,looseness=7]
+      node[alab,right]{depends\_on} (ph.north east);
+% SharedVar consumed by Components
+\draw[assoc] (shv.north) to[out=110,in=-70]
+      node[alab,pos=0.5,left]{consumers\\[-1pt]{\at 1..*}} (comp.south);
+% traceability: design elements -> requirements (also constraints; see legend)
+\draw[trace] (dv.east)  to[out=0,in=175] node[alab,pos=0.5]{traces\_to} (req.west);
+\draw[trace] (obj.east) to[out=0,in=185] (crit.west);
+
+% =====================================================================
+%  legend — UML notation
+% =====================================================================
+\node[anchor=north west, align=left, font=\sffamily\scriptsize, text=ink,
+      draw=muted, line width=0.5pt, fill=white, rounded corners=2pt,
+      inner sep=6pt] at (-2.4,-4.6)
+{\textbf{UML class diagram}\ \footnotesize(logical data model; classes + fields from \texttt{plan\_schema.py})\\[4pt]
+ \tikz[baseline]{\node[rectangle split, rectangle split parts=2, align=left, draw=edge, line width=0.5pt, inner sep=1.5pt, font=\sffamily\tiny]{\cn{Class}\nodepart{two}fields};}\ \ name / attributes\qquad
+ \tikz\draw[comp](0,0)--(0.7,0); \ \textbf{composition} (Plan owns the part); the number at the part end is the \textbf{multiplicity} —\\
+ how many of that part a Plan may hold: \texttt{1..*} one or more \ $\cdot$\ \texttt{0..*} any number (optional, repeatable) \ $\cdot$\ \texttt{0..1} at most one\\[4pt]
+ \tikz\draw[assoc](0,0)--(0.7,0); \ association: \textit{connections}, \textit{depends\_on} (reflexive), \textit{consumers}\qquad
+ \tikz\draw[trace](0,0)--(0.7,0); \ \textit{traces\_to}: design\_variables $\cdot$ constraints $\cdot$ objective $\to$ requirements\\[4pt]
+ header tint groups sections: \tikz\node[fill=mblue,draw=muted,line width=0.3pt,minimum width=5mm,minimum height=3mm,inner sep=0pt]{};\,model\ \ \
+ \tikz\node[fill=mamber,draw=muted,line width=0.3pt,minimum width=5mm,minimum height=3mm,inner sep=0pt]{};\,optimization\ \ \
+ \tikz\node[fill=mrose,draw=muted,line width=0.3pt,minimum width=5mm,minimum height=3mm,inner sep=0pt]{};\,intent\ \ \
+ \tikz\node[fill=mgray,draw=muted,line width=0.3pt,minimum width=5mm,minimum height=3mm,inner sep=0pt]{};\,process\ \ (no formal meaning)};
+
+\end{tikzpicture}
+\end{document}
