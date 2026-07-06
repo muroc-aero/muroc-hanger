@@ -292,7 +292,7 @@ class TestOASAeroLaneC:
     async def test_aero_analysis_parity(self):
         sys.path.insert(0, str(EXAMPLES_DIR / "oas_aero_rect"))
         from oas_aero_rect.lane_a.aero_analysis import run as lane_a_run
-        from oas_aero_rect.shared import FLIGHT, TOL_ANALYSIS, WING
+        from oas_aero_rect.shared import FLIGHT, WING
 
         lane_a = lane_a_run()
 
@@ -314,8 +314,8 @@ class TestOASAeroLaneC:
                           keys=["CL", "CD"],
                           case="oas_aero_rect", lane_label="C")
 
-        assert summary["CL"] == pytest.approx(lane_a["CL"], **TOL_ANALYSIS)
-        assert summary["CD"] == pytest.approx(lane_a["CD"], **TOL_ANALYSIS)
+        assert summary["CL"] == pytest.approx(lane_a["CL"], rel=1e-6)
+        assert summary["CD"] == pytest.approx(lane_a["CD"], rel=1e-6)
 
 
 class TestOASAerostructLaneC:
@@ -326,7 +326,7 @@ class TestOASAerostructLaneC:
         from oas_aerostruct_rect.lane_a.aerostruct_analysis import (
             run as lane_a_run,
         )
-        from oas_aerostruct_rect.shared import FLIGHT, TOL_ANALYSIS, WING
+        from oas_aerostruct_rect.shared import FLIGHT, WING
 
         lane_a = lane_a_run()
 
@@ -358,8 +358,8 @@ class TestOASAerostructLaneC:
                           keys=["CL", "CD"],
                           case="oas_aerostruct_rect", lane_label="C")
 
-        assert summary["CL"] == pytest.approx(lane_a["CL"], **TOL_ANALYSIS)
-        assert summary["CD"] == pytest.approx(lane_a["CD"], **TOL_ANALYSIS)
+        assert summary["CL"] == pytest.approx(lane_a["CL"], rel=1e-6)
+        assert summary["CD"] == pytest.approx(lane_a["CD"], rel=1e-6)
 
 
 class TestOCPCaravanFullLaneC:
