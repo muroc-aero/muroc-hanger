@@ -1,0 +1,98 @@
+# avy tool reference
+
+Parameter reference for the Aviary MCP tools. Aviary (NASA) couples aircraft
+sizing (FLOPS/GASP legacy methods) with dymos mission trajectory optimization
+on OpenMDAO. Every analysis run is a driver run.
+
+## load_aircraft_template
+
+| Parameter | Type | Default | Notes |
+|---|---|---|---|
+| template | str | required | See list_aircraft_templates. energy_state decks are runnable; 2DOF decks are listed but rejected by analysis. |
+| name | str | "aircraft" | Registry name used by all subsequent calls |
+| session_id | str | "default" | |
+
+Templates (deck paths resolve inside the installed aviary package):
+
+- `advanced_single_aisle` -- N3CC-like advanced single aisle, FLOPS, energy_state
+- `large_single_aisle_FLOPS` -- 737-800 class, FLOPS, energy_state
+- `large_single_aisle_2_FLOPS` -- second large single-aisle variant
+- `bench_FwFm` / `bench_GwFm` -- upstream benchmark decks (energy_state)
+- `large_single_aisle_GASP`, `small_single_aisle_GASP` -- 2DOF decks (not yet runnable)
+
+## define_aircraft
+
+Overrides accumulate; values apply to the deck's AviaryValues at run time.
+
+| Parameter | Type | Default | Notes |
+|---|---|---|---|
+| aircraft_name | str | "aircraft" | |
+| overrides | dict | None | `{name: value}` or `{name: [value, units]}`. Names use the `aircraft:wing:span` hierarchy and are validated against Aviary's variable metadata with close-match suggestions. Bare values use the metadata default units. |
+
+Common variables: `aircraft:wing:aspect_ratio`, `aircraft:wing:area` (ft**2),
+`aircraft:crew_and_payload:num_passengers`, `aircraft:design:gross_mass` (lbm),
+`aircraft:design:range` (nmi).
+
+## configure_mission
+
+Builds the phase_info from the mission-method default (energy_state:
+climb/cruise/descent) plus overrides. Re-calling rebuilds from defaults.
+
+| Parameter | Type | Default | Notes |
+|---|---|---|---|
+| aircraft_name | str | "aircraft" | |
+| mission_method | str | "energy_state" | Only energy_state currently |
+| target_range_nm | float | None | Sets constrain_range + target_range |
+| include_takeoff | bool | None | Detailed takeoff phase in pre_mission |
+| include_landing | bool | None | Detailed landing phase in post_mission |
+| phase_options | dict | None | Per-phase user_options overrides, validated |
+
+phase_options example:
+
+```json
+{"cruise": {"num_segments": 3, "mach_final": 0.75},
+ "climb": {"altitude_final": [35000, "ft"]}}
+```
+
+Options with (value, units) defaults accept a bare number (default units
+kept) or a `[value, units]` pair. Unknown phase or option names error with
+suggestions. Key per-phase options: `num_segments`, `order`,
+`mach_initial/final/bounds/optimize`, `altitude_initial/final/bounds/optimize`,
+`throttle_enforcement`, `time_duration_bounds`.
+
+## run_sizing
+
+| Parameter | Type | Default | Notes |
+|---|---|---|---|
+| aircraft_name | str | "aircraft" | |
+| optimizer | str | "SLSQP" | IPOPT/SNOPT need pyoptsparse (clear error when absent) |
+| max_iter | int | 50 | [1, 500] |
+| run_name | str | None | Label |
+
+Runtime: ~20 s for the default 3-phase mission with SLSQP; minutes for
+missions with takeoff/landing or more segments.
+
+Results envelope:
+
+- `results.performance` -- `gross_mass_lbm`, `total_fuel_mass_lbm`,
+  `fuel_burned_lbm`, `operating_mass_lbm`, `zero_fuel_mass_lbm`,
+  `final_mass_lbm`, `range_nmi`, `final_time_min`
+- `results.design` -- `design_gross_mass_lbm`, `wing_area_ft2`, `wing_span_ft`
+- `results.optimizer.success` -- CHECK THIS (also surfaced as the
+  `optimizer.success` validation finding); non-convergence does not raise
+- `results.timeseries` -- downsampled per-phase mission history
+  (`time_s`, `altitude_ft`, `mach`, `mass_lbm`, `distance_nmi`, `throttle`,
+  `phase`)
+
+## visualize
+
+| plot_type | Shows |
+|---|---|
+| mission_profile | altitude, Mach, mass, throttle vs range (2x2, phase-colored) |
+| mass_breakdown | gross / zero-fuel / operating / fuel bars |
+| performance_summary | table card of all key sizing metrics |
+
+## Requirements paths (set_requirements)
+
+Dot paths into results, e.g. `performance.gross_mass_lbm`,
+`performance.total_fuel_mass_lbm`, `performance.final_time_min`.

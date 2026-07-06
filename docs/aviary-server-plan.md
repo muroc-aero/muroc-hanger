@@ -5,10 +5,13 @@ Add `packages/avy/` wrapping [Aviary](https://github.com/OpenMDAO/Aviary)
 incorporating the legacy FLOPS and GASP methods), patterned on the existing
 `packages/ocp/`, `packages/pyc/`, and `packages/evt/` servers.
 
-Status: **pre-plan / design**. Aviary is pure-Python and pip-installable, so
-unlike hangar-vsp there is no build-spike gate; the go/no-go question is the
-Phase 0 API spike (run the upstream benchmark deck through Level 1/2 under
-SLSQP and confirm convergence + result extraction without pyoptsparse).
+Status: **Phases 0-3 implemented** (`packages/avy/`, PR pending). Phase 0
+passed decisively: SLSQP converges the advanced-single-aisle sizing on the
+default energy_state mission in ~20 s, so the parity suite is CI-viable.
+One planning assumption did not survive contact -- see the **numpy-2
+isolation** note under "Impact on the-hangar": Aviary cannot share the
+workspace venv, so it runs from an isolated `.venv-avy`
+(`scripts/setup-avy-venv.sh`) and its own Docker image.
 
 ## Why this tool
 
@@ -101,14 +104,23 @@ Nothing in the SDK, envelope, provenance, or session architecture needs to
 change. The deltas:
 
 1. **`upstream-pins.env` / dev-setup**: add `AVY_REF` (full SHA at the
-   v1.0.1 tag or later) and clone into `upstream/Aviary` via
-   `scripts/setup-upstream.sh`, editable-installed like OpenConcept
-   (`aviary = { path = "../../upstream/Aviary", editable = true }`).
-   Pure `git clone && pip install` — no patch, no compiled step.
-2. **Dependency weight**: Aviary pulls `dymos`, `panel`, `bokeh`,
-   `hvplot`, `pandas` into the workspace. Acceptable; the dashboard
-   (panel/bokeh) is NOT exposed as a tool — our viewer + `visualize`
-   cover it — so those imports stay unexercised on the server path.
+   v1.0.1 tag) and clone into `upstream/Aviary` via
+   `scripts/setup-upstream.sh`. Pure `git clone` — no patch, no compiled
+   step.
+2. **numpy-2 isolation (found in implementation, supersedes the original
+   "editable install like OpenConcept" plan)**: Aviary >=1.0.1 requires
+   `openmdao>=3.43`, which requires `numpy>=2`, while the openconcept pin
+   caps `numpy<2` (still capped on upstream main as of 2026-07). The two
+   cannot share one venv/lock, so `hangar-avy` does **not** declare
+   `aviary` as a dependency (lazy import + install-instruction error,
+   exactly how the vsp plan handles openvsp). The Aviary runtime lives in
+   `.venv-avy` at the repo root (`scripts/setup-avy-venv.sh`: hangar-sdk +
+   hangar-avy + editable `upstream/Aviary`), and in the package's own
+   Docker image (which installs only sdk + avy + aviary, so no conflict
+   in containers). Aviary-dependent tests `importorskip("aviary")` and
+   run for real via `.venv-avy/bin/python -m pytest`. Revisit if/when
+   openconcept relaxes its numpy cap — then Aviary can fold into the
+   main workspace as originally planned.
 3. **pyoptsparse is optional everywhere**: pyproject depends only on
    scipy-backed SLSQP; the `create_*`/`run_*` tools accept
    `optimizer="SLSQP"|"IPOPT"|"SNOPT"` and return a typed
@@ -270,6 +282,11 @@ optimizer, `max_iter`, `num_segments`, and transcription order in
   **self-driving component** (plan `mode: analysis` runs the embedded
   optimization; plan-level DVs limited to deck scalars for sweeps/DOE),
   mirroring how evt's sizing iteration is wrapped.
+  **Blocked by the numpy-2 split**: omd runs in the main venv, which
+  cannot import aviary, so the factory (and with it the omd-level Lane B/C
+  for this case) waits on the openconcept numpy cap. The per-tool Lane A/B
+  suite (implemented, `packages/avy/examples/single_aisle_sizing/`) is the
+  parity coverage until then.
 - `add_external_subsystem` (stretch): register upstream's OAS wingbox
   mass builder inside an Aviary run — an Aviary+OAS lane case that tests
   the composition direction none of the current 13 cases cover

@@ -1,0 +1,199 @@
+"""Physics and numerics validation for Aviary sizing results.
+
+Each check returns a ValidationFinding from the SDK. The optimizer-success
+check is the load-bearing one: optimizer non-convergence is Aviary's primary
+failure mode and it does NOT raise -- it returns a solved-looking problem
+with a failed result flag.
+"""
+
+from __future__ import annotations
+
+from hangar.sdk.validation.checks import ValidationFinding, findings_to_dict  # noqa: F401
+
+
+def _check_optimizer_success(success: bool | None, optimizer: str, max_iter: int) -> ValidationFinding:
+    if success is None:
+        return ValidationFinding(
+            check_id="optimizer.success",
+            category="numerics",
+            severity="warning",
+            confidence="high",
+            passed=False,
+            message="Optimizer result flag not available.",
+            remediation="Inspect the run logs; treat results as unverified.",
+        )
+    if not success:
+        return ValidationFinding(
+            check_id="optimizer.success",
+            category="numerics",
+            severity="error",
+            confidence="high",
+            passed=False,
+            message=f"Optimizer {optimizer} did NOT converge (max_iter={max_iter}). "
+            "All reported values are from the last iterate, not an optimum.",
+            remediation="Increase max_iter, relax the mission (fewer constraints, "
+            "wider bounds), or check the aircraft deck for inconsistent inputs.",
+        )
+    return ValidationFinding(
+        check_id="optimizer.success",
+        category="numerics",
+        severity="info",
+        confidence="high",
+        passed=True,
+        message=f"Optimizer {optimizer} converged.",
+    )
+
+
+def _check_fuel_fraction(gross: float | None, fuel: float | None) -> ValidationFinding:
+    if not gross or not fuel:
+        return ValidationFinding(
+            check_id="fuel.fraction",
+            category="physics",
+            severity="info",
+            confidence="low",
+            passed=True,
+            message="Gross mass or fuel mass unavailable; skipping fuel-fraction check.",
+        )
+    frac = fuel / gross
+    if 0.03 <= frac <= 0.55:
+        return ValidationFinding(
+            check_id="fuel.fraction",
+            category="physics",
+            severity="info",
+            confidence="medium",
+            passed=True,
+            message=f"Fuel fraction = {frac:.3f} is within the typical transport range [0.03, 0.55].",
+        )
+    return ValidationFinding(
+        check_id="fuel.fraction",
+        category="physics",
+        severity="warning",
+        confidence="medium",
+        passed=False,
+        message=f"Fuel fraction = {frac:.3f} outside typical transport range [0.03, 0.55].",
+        remediation="Check target range, engine deck, and mass-method settings.",
+    )
+
+
+def _check_mass_closure(
+    gross: float | None, zero_fuel: float | None, fuel: float | None
+) -> ValidationFinding:
+    if not gross or not zero_fuel or fuel is None:
+        return ValidationFinding(
+            check_id="mass.closure",
+            category="physics",
+            severity="info",
+            confidence="low",
+            passed=True,
+            message="Mass components unavailable; skipping closure check.",
+        )
+    residual = abs(gross - (zero_fuel + fuel)) / gross
+    if residual <= 0.01:
+        return ValidationFinding(
+            check_id="mass.closure",
+            category="physics",
+            severity="info",
+            confidence="high",
+            passed=True,
+            message=f"Mass closure: |gross - (zero_fuel + fuel)| / gross = {residual:.4f}.",
+        )
+    return ValidationFinding(
+        check_id="mass.closure",
+        category="physics",
+        severity="warning",
+        confidence="medium",
+        passed=False,
+        message=f"Mass closure residual {residual:.3f} exceeds 1% of gross mass.",
+        remediation="The mass residual constraint may not be satisfied; check "
+        "optimizer convergence and reserve-fuel settings.",
+    )
+
+
+def _check_range_target(
+    range_nmi: float | None, target_range_nmi: float | None
+) -> ValidationFinding:
+    if not range_nmi or not target_range_nmi:
+        return ValidationFinding(
+            check_id="range.target",
+            category="physics",
+            severity="info",
+            confidence="low",
+            passed=True,
+            message="No range target to check against.",
+        )
+    rel = abs(range_nmi - target_range_nmi) / target_range_nmi
+    if rel <= 0.01:
+        return ValidationFinding(
+            check_id="range.target",
+            category="physics",
+            severity="info",
+            confidence="high",
+            passed=True,
+            message=f"Mission range {range_nmi:.1f} nmi matches target "
+            f"{target_range_nmi:.1f} nmi (rel err {rel:.2e}).",
+        )
+    return ValidationFinding(
+        check_id="range.target",
+        category="physics",
+        severity="warning",
+        confidence="high",
+        passed=False,
+        message=f"Mission range {range_nmi:.1f} nmi misses target "
+        f"{target_range_nmi:.1f} nmi by {rel:.1%}.",
+        remediation="Range constraint not met -- usually optimizer non-convergence.",
+    )
+
+
+def _check_transport_domain(gross: float | None) -> ValidationFinding:
+    if not gross:
+        return ValidationFinding(
+            check_id="domain.transport",
+            category="physics",
+            severity="info",
+            confidence="low",
+            passed=True,
+            message="Gross mass unavailable; skipping domain check.",
+        )
+    if 10_000 <= gross <= 1_200_000:
+        return ValidationFinding(
+            check_id="domain.transport",
+            category="physics",
+            severity="info",
+            confidence="medium",
+            passed=True,
+            message=f"Gross mass {gross:,.0f} lbm is within the transport-category "
+            "domain the FLOPS/GASP correlations are calibrated for.",
+        )
+    return ValidationFinding(
+        check_id="domain.transport",
+        category="physics",
+        severity="warning",
+        confidence="medium",
+        passed=False,
+        message=f"Gross mass {gross:,.0f} lbm is outside the transport-category "
+        "calibration domain of the FLOPS/GASP empirical methods.",
+        remediation="Treat mass-buildup results as extrapolation; consider a "
+        "tool calibrated for this vehicle class.",
+    )
+
+
+def validate_sizing_results(
+    results: dict,
+    optimizer: str,
+    max_iter: int,
+    target_range_nmi: float | None = None,
+) -> list[ValidationFinding]:
+    """Run all physics/numerics checks on a sizing result set."""
+    perf = results.get("performance", {})
+    opt = results.get("optimizer", {})
+    return [
+        _check_optimizer_success(opt.get("success"), optimizer, max_iter),
+        _check_fuel_fraction(perf.get("gross_mass_lbm"), perf.get("total_fuel_mass_lbm")),
+        _check_mass_closure(
+            perf.get("gross_mass_lbm"),
+            perf.get("zero_fuel_mass_lbm"),
+            perf.get("total_fuel_mass_lbm"),
+        ),
+        _check_range_target(perf.get("range_nmi"), target_range_nmi),
+        _check_transport_domain(perf.get("gross_mass_lbm")),
+    ]
