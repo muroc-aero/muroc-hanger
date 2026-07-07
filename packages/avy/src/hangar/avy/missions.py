@@ -37,6 +37,9 @@ def default_phase_info(mission_method: str = "energy_state") -> dict:
             f"{', '.join(MISSION_METHODS)}. (2DOF/GASP missions are not wired "
             f"up in this server yet.)"
         )
+    from hangar.avy.runner import require_aviary
+
+    require_aviary()
     import importlib
 
     mod = importlib.import_module("aviary.models.missions.energy_state_default")
@@ -52,12 +55,20 @@ def _merge_options(target: dict, overrides: dict, context: str) -> None:
                 f"{sorted(target)}.{_suggest(key, target)}"
             )
         default = target[key]
+        is_units_pair = (
+            isinstance(val, list) and len(val) == 2 and isinstance(val[1], str)
+        )
         if isinstance(default, tuple) and len(default) == 2 and not isinstance(val, tuple):
             # (value, units) slot: allow bare value (keep units) or [value, units]
-            if isinstance(val, (list,)) and len(val) == 2 and isinstance(val[1], str):
+            if is_units_pair:
                 target[key] = (val[0], val[1])
             else:
                 target[key] = (val, default[1])
+        elif is_units_pair:
+            raise ValueError(
+                f"Option {key!r} in {context} does not take units "
+                f"(default is {default!r}); pass a bare value, not {val!r}."
+            )
         else:
             target[key] = val
 

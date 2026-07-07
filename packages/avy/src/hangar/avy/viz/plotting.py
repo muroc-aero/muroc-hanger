@@ -77,8 +77,13 @@ def plot_mission_profile(
         # One line segment per phase so phase boundaries are visible
         seen = []
         for phase in dict.fromkeys(phases):
-            xs = [xi for xi, p, yi in zip(x, phases, y) if p == phase and yi is not None]
-            ys = [yi for xi, p, yi in zip(x, phases, y) if p == phase and yi is not None]
+            pairs = [
+                (xi, yi)
+                for xi, p, yi in zip(x, phases, y)
+                if p == phase and xi is not None and yi is not None
+            ]
+            xs = [xi for xi, _ in pairs]
+            ys = [yi for _, yi in pairs]
             if not xs:
                 continue
             color = _PHASE_COLORS.get(phase)

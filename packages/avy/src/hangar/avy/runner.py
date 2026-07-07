@@ -28,6 +28,12 @@ from pathlib import Path
 
 _RUN_LOCK = threading.Lock()
 
+# os.chdir is process-global, so while a run holds the lock every relative
+# path in the process resolves against that run's scratch dir. Anchor
+# scratch paths to the cwd at import time (server/CLI startup, before any
+# run) so a queued run's scratch never resolves inside the active run's.
+_LAUNCH_CWD = Path.cwd()
+
 VALID_OPTIMIZERS = ("SLSQP", "IPOPT", "SNOPT")
 
 # Tool-facing mission_type -> Aviary ProblemType value
@@ -72,14 +78,21 @@ def check_optimizer_available(optimizer: str) -> None:
 
 @contextlib.contextmanager
 def _scratch_run(scratch_dir: str | Path | None):
-    """Serialize the run and execute it inside the scratch cwd."""
+    """Serialize the run and execute it inside the scratch cwd.
+
+    The scratch path is anchored to the launch cwd, and created only after
+    the lock is held -- doing either against the *current* cwd would race
+    with the run that holds the lock (its chdir is process-global).
+    """
     from openmdao.core.problem import _clear_problem_names
 
-    scratch = Path(scratch_dir) if scratch_dir else Path.cwd()
-    scratch.mkdir(parents=True, exist_ok=True)
+    scratch = Path(scratch_dir) if scratch_dir else _LAUNCH_CWD
+    if not scratch.is_absolute():
+        scratch = _LAUNCH_CWD / scratch
 
     with _RUN_LOCK:
         old_cwd = os.getcwd()
+        scratch.mkdir(parents=True, exist_ok=True)
         os.chdir(scratch)
         try:
             _clear_problem_names()
@@ -158,14 +171,20 @@ def run_payload_range_problem(
 ):
     """Size the aircraft, then run the payload-range off-design missions.
 
-    Returns ``(sizing_prob, (max_fuel_payload_prob, ferry_prob))``; the inner
-    tuple is empty when upstream skips the analysis (unconverged sizing).
+    Returns ``(sizing_prob, (max_fuel_payload_prob, ferry_prob))``; the
+    inner tuple is empty when the sizing did not converge (a diagram from
+    an unconverged design is meaningless -- and upstream's own skip is
+    verbosity-gated away at QUIET, plus it returns None rather than () when
+    an off-design mission fails, so both cases are normalized here).
     Blocking; roughly 3x a plain sizing run.
     """
     require_aviary()
     with _scratch_run(scratch_dir):
         sizing_prob = _solve_sizing(aircraft_data, phase_info, optimizer, max_iter)
-        pr_probs = sizing_prob.run_payload_range(verbosity=0)
+        if sizing_prob.result.success:
+            pr_probs = sizing_prob.run_payload_range(verbosity=0) or ()
+        else:
+            pr_probs = ()
     return sizing_prob, pr_probs
 
 

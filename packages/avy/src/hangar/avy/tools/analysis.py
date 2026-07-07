@@ -13,6 +13,8 @@ the sizing internally -- expect ~2x / ~3x the run_sizing wall-clock.
 from __future__ import annotations
 
 import asyncio
+import copy
+import shutil
 import time
 from typing import Annotated
 
@@ -34,7 +36,11 @@ from hangar.avy.runner import (
     run_payload_range_problem,
     run_sizing_problem,
 )
-from hangar.avy.validation import validate_sizing_results
+from hangar.avy.validation import (
+    design_point_finding,
+    payload_range_findings,
+    validate_sizing_results,
+)
 from hangar.avy.validators import validate_aircraft_exists, validate_max_iter
 from hangar.avy.tools._helpers import _finalize_analysis, _make_run_id, _run_scratch_dir
 
@@ -45,7 +51,13 @@ def _prepare_run(session, aircraft_name: str, optimizer: str, max_iter: int):
     """Shared preflight for the analysis tools.
 
     Validates inputs and returns ``(aircraft_cfg, phase_info, phase_names,
-    target_range_nm)``.
+    target_range_nm, phases_summary)``. The returned phase_info is a DEEP
+    COPY of the session-stored mission: Aviary mutates the dict it is given
+    in place (load_inputs replaces each phase's user_options with the fully
+    defaulted expansion, and run_payload_range widens the cruise duration
+    bounds), so handing over the stored dict would make repeat runs solve a
+    different problem. The summary is taken before the copy is run, so the
+    envelope records the *configured* mission, not the mutated one.
     """
     aircraft_cfg = validate_aircraft_exists(session, aircraft_name)
     if aircraft_cfg["mission_method"] not in MISSION_METHODS:
@@ -63,7 +75,7 @@ def _prepare_run(session, aircraft_name: str, optimizer: str, max_iter: int):
         phase_info = build_phase_info(mission_method="energy_state")
         target_range_nm = None
     else:
-        phase_info = mission["phase_info"]
+        phase_info = copy.deepcopy(mission["phase_info"])
         target_range_nm = mission.get("target_range_nm")
 
     # The default mission's target range lives in the phase_info even when
@@ -71,10 +83,28 @@ def _prepare_run(session, aircraft_name: str, optimizer: str, max_iter: int):
     if target_range_nm is None:
         target = phase_info.get("post_mission", {}).get("target_range")
         if target is not None and phase_info["post_mission"].get("constrain_range"):
-            target_range_nm = float(target[0])
+            value, units = target
+            if units in ("nmi", "NM"):
+                target_range_nm = float(value)
+            else:
+                from openmdao.utils.units import convert_units
+
+                target_range_nm = float(convert_units(value, units, "nmi"))
 
     phase_names = [p for p in phase_info if p not in _TOP_LEVEL]
-    return aircraft_cfg, phase_info, phase_names, target_range_nm
+    phases_summary = summarize_phase_info(phase_info)
+    return aircraft_cfg, phase_info, phase_names, target_range_nm, phases_summary
+
+
+def _cleanup_scratch(scratch_dir: str, results: dict) -> None:
+    """Remove the per-run scratch dir after a converged run.
+
+    Scratch dirs (dymos recorders, off-design ``*_out`` dirs) are several MB
+    per run and are never read back by the tools; keep them only for failed
+    runs, where they are the debugging evidence.
+    """
+    if results.get("optimizer", {}).get("success"):
+        shutil.rmtree(scratch_dir, ignore_errors=True)
 
 
 async def run_sizing(
@@ -105,7 +135,7 @@ async def run_sizing(
     t0 = time.perf_counter()
     session = _sessions.get(session_id)
 
-    aircraft_cfg, phase_info, phase_names, target_range_nm = _prepare_run(
+    aircraft_cfg, phase_info, phase_names, target_range_nm, phases_summary = _prepare_run(
         session, aircraft_name, optimizer, max_iter
     )
     run_id = _make_run_id()
@@ -123,6 +153,7 @@ async def run_sizing(
         return extract_sizing_results(prob, phase_names)
 
     results = await asyncio.to_thread(_suppress_output, _run)
+    _cleanup_scratch(scratch_dir, results)
 
     aircraft_cfg["sized_run_id"] = run_id
 
@@ -138,7 +169,7 @@ async def run_sizing(
         "optimizer": optimizer,
         "max_iter": max_iter,
         "target_range_nm": target_range_nm,
-        "phases": summarize_phase_info(phase_info),
+        "phases": phases_summary,
     }
 
     return await _finalize_analysis(
@@ -211,7 +242,7 @@ async def run_off_design(
     if mission_range_nm is not None and mission_range_nm <= 0:
         raise ValueError(f"mission_range_nm must be positive (got {mission_range_nm})")
 
-    aircraft_cfg, phase_info, phase_names, _ = _prepare_run(
+    aircraft_cfg, phase_info, phase_names, _, _phases = _prepare_run(
         session, aircraft_name, optimizer, max_iter
     )
     run_id = _make_run_id()
@@ -245,10 +276,16 @@ async def run_off_design(
         return results
 
     results = await asyncio.to_thread(_suppress_output, _run)
+    _cleanup_scratch(scratch_dir, results)
 
     # The off-design range is a result ('max_range') or a target ('min_fuel').
     findings = validate_sizing_results(
         results, optimizer, max_iter, target_range_nmi=mission_range_nm
+    )
+    # The internal sizing can fail while the off-design mission "converges"
+    # from the unsized iterate -- that failure must gate validation too.
+    findings.append(
+        design_point_finding(results["design_point"].get("optimizer_success"))
     )
 
     inputs = {
@@ -301,13 +338,15 @@ async def run_payload_range(
     run_sizing wall-clock.
 
     Returns an envelope with results.payload_range.points plus the sizing
-    performance, and errors if the sizing did not converge (the diagram is
-    meaningless from an unconverged design).
+    performance. If the sizing does not converge the off-design missions
+    are skipped: the envelope carries only the first two points and
+    validation FAILS (the optimizer.success finding) -- as with every avy
+    tool, non-convergence is reported, not raised.
     """
     t0 = time.perf_counter()
     session = _sessions.get(session_id)
 
-    aircraft_cfg, phase_info, phase_names, target_range_nm = _prepare_run(
+    aircraft_cfg, phase_info, phase_names, target_range_nm, _phases = _prepare_run(
         session, aircraft_name, optimizer, max_iter
     )
     run_id = _make_run_id()
@@ -332,16 +371,13 @@ async def run_payload_range(
         return results
 
     results = await asyncio.to_thread(_suppress_output, _run)
-
-    if len(results["payload_range"]["points"]) < 4:
-        raise RuntimeError(
-            "Payload-range analysis was skipped by Aviary (the sizing run did "
-            "not converge). Fix the sizing first -- see the optimizer.success "
-            "finding on a plain run_sizing call."
-        )
+    _cleanup_scratch(scratch_dir, results)
 
     findings = validate_sizing_results(
         results, optimizer, max_iter, target_range_nmi=target_range_nm
+    )
+    findings.append(
+        payload_range_findings(results["payload_range"])
     )
 
     inputs = {

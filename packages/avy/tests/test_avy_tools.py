@@ -134,6 +134,42 @@ async def test_run_sizing_without_aviary_gives_install_instructions(single_aisle
         await run_sizing(aircraft_name=single_aisle)
 
 
+@pytest.mark.skipif(HAS_AVIARY, reason="aviary installed; error path not reachable")
+async def test_definition_tools_without_aviary_give_install_instructions(single_aisle):
+    with pytest.raises(RuntimeError, match="setup-avy-venv"):
+        await define_aircraft(
+            aircraft_name=single_aisle, overrides={"aircraft:wing:span": 100}
+        )
+    with pytest.raises(RuntimeError, match="setup-avy-venv"):
+        await configure_mission(aircraft_name=single_aisle)
+
+
+def test_design_point_finding_failure_is_error():
+    from hangar.avy.validation import design_point_finding
+
+    finding = design_point_finding(False)
+    assert not finding.passed
+    assert finding.severity == "error"
+    assert design_point_finding(True).passed
+
+
+def test_payload_range_findings_partial_diagram_fails():
+    from hangar.avy.validation import payload_range_findings
+
+    partial = {"points": [{"label": "max_payload"}, {"label": "design_mission"}],
+               "off_design_success": []}
+    finding = payload_range_findings(partial)
+    assert not finding.passed
+    assert finding.severity == "error"
+
+    complete = {
+        "points": [{"label": l} for l in
+                   ("max_payload", "design_mission", "max_fuel_plus_payload", "ferry_range")],
+        "off_design_success": [True, True],
+    }
+    assert payload_range_findings(complete).passed
+
+
 # ---------------------------------------------------------------------------
 # Tests that need aviary (run in .venv-avy)
 # ---------------------------------------------------------------------------
@@ -221,3 +257,31 @@ async def test_configure_mission_rejects_unknown_option(single_aisle):
             aircraft_name=single_aisle,
             phase_options={"cruise": {"num_segmentz": 3}},
         )
+
+
+async def test_configure_mission_rejects_units_pair_on_unitless_option(single_aisle):
+    pytest.importorskip("aviary")
+    with pytest.raises(ValueError, match="does not take units"):
+        await configure_mission(
+            aircraft_name=single_aisle,
+            phase_options={"cruise": {"num_segments": [3, "unitless"]}},
+        )
+
+
+async def test_repeat_runs_use_unmutated_mission(single_aisle):
+    """Aviary mutates the phase_info it is given; the session copy must not drift."""
+    pytest.importorskip("aviary")
+    await configure_mission(aircraft_name=single_aisle, target_range_nm=1500.0)
+    from hangar.avy.state import sessions
+    from hangar.avy.tools.analysis import _prepare_run
+
+    session = sessions.get("default")
+    stored = session.aircraft[single_aisle]["mission"]["phase_info"]
+    before = repr(stored)
+
+    _, phase_info, _, _, _ = _prepare_run(session, single_aisle, "SLSQP", 50)
+    assert phase_info is not stored
+    # mutating the returned copy (as Aviary does in-place) leaves the session intact
+    phase_info["cruise"]["user_options"]["num_segments"] = 99
+    phase_info["post_mission"]["target_range"] = (9999.0, "nmi")
+    assert repr(stored) == before

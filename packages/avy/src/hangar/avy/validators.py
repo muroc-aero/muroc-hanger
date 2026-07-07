@@ -24,6 +24,9 @@ def validate_aircraft_exists(session, aircraft_name: str) -> dict:
 
 def validate_deck_overrides(overrides: dict) -> None:
     """Validate override variable names against Aviary's variable metadata."""
+    from hangar.avy.runner import require_aviary
+
+    require_aviary()
     from aviary.variable_info.variable_meta_data import _MetaData
 
     for name, spec in overrides.items():

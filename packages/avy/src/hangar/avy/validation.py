@@ -177,6 +177,65 @@ def _check_transport_domain(gross: float | None) -> ValidationFinding:
     )
 
 
+def design_point_finding(success: bool | None) -> ValidationFinding:
+    """Convergence of the internal sizing underneath an off-design run.
+
+    The off-design mission can 'converge' from an unsized last iterate, so
+    the off-design optimizer flag alone is not sufficient.
+    """
+    if success:
+        return ValidationFinding(
+            check_id="optimizer.design_point_success",
+            category="numerics",
+            severity="info",
+            confidence="high",
+            passed=True,
+            message="The internal sizing (design point) converged.",
+        )
+    return ValidationFinding(
+        check_id="optimizer.design_point_success",
+        category="numerics",
+        severity="error",
+        confidence="high",
+        passed=False,
+        message="The internal sizing did NOT converge -- the off-design "
+        "mission was flown with an unsized design; all values are unreliable.",
+        remediation="Fix the sizing first (see run_sizing with the same "
+        "aircraft): increase max_iter or simplify the mission.",
+    )
+
+
+def payload_range_findings(payload_range: dict) -> ValidationFinding:
+    """Completeness of the payload-range diagram.
+
+    When the sizing fails, the off-design missions are skipped and only the
+    first two points exist; a partial diagram must fail validation loudly.
+    """
+    points = payload_range.get("points") or []
+    od_success = payload_range.get("off_design_success") or []
+    if len(points) >= 4 and all(od_success):
+        return ValidationFinding(
+            check_id="payload_range.complete",
+            category="numerics",
+            severity="info",
+            confidence="high",
+            passed=True,
+            message="All four payload-range points computed and converged.",
+        )
+    return ValidationFinding(
+        check_id="payload_range.complete",
+        category="numerics",
+        severity="error",
+        confidence="high",
+        passed=False,
+        message=f"Payload-range diagram incomplete: {len(points)}/4 points, "
+        f"off-design convergence flags {od_success}. The off-design missions "
+        "are skipped when the sizing fails.",
+        remediation="Check the optimizer.success finding; fix the sizing "
+        "before reading the diagram.",
+    )
+
+
 def validate_sizing_results(
     results: dict,
     optimizer: str,
