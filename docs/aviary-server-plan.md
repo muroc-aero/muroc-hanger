@@ -5,7 +5,10 @@ Add `packages/avy/` wrapping [Aviary](https://github.com/OpenMDAO/Aviary)
 incorporating the legacy FLOPS and GASP methods), patterned on the existing
 `packages/ocp/`, `packages/pyc/`, and `packages/evt/` servers.
 
-Status: **Phases 0-3 implemented** (`packages/avy/`, PR pending). Phase 0
+Status: **Phases 0-3 implemented, plus the Phase-2 off-design tools, the
+avy-cli-guide skill, DEPLOY.md, and two parity example suites** (five
+Lane-A/B cases total; `packages/avy/`, PR #99). Remaining: the omd factory
+and omd-level Lane B/C (blocked, see Phase 4) and live deployment. Phase 0
 passed decisively: SLSQP converges the advanced-single-aisle sizing on the
 default energy_state mission in ~20 s, so the parity suite is CI-viable.
 One planning assumption did not survive contact -- see the **numpy-2
@@ -284,9 +287,14 @@ optimizer, `max_iter`, `num_segments`, and transcription order in
   mirroring how evt's sizing iteration is wrapped.
   **Blocked by the numpy-2 split**: omd runs in the main venv, which
   cannot import aviary, so the factory (and with it the omd-level Lane B/C
-  for this case) waits on the openconcept numpy cap. The per-tool Lane A/B
-  suite (implemented, `packages/avy/examples/single_aisle_sizing/`) is the
-  parity coverage until then.
+  for this case) waits on the openconcept numpy cap. The per-tool parity
+  coverage until then (all implemented):
+  `packages/avy/examples/single_aisle_sizing/` (three cases -- default
+  sizing, deck-override via define_aircraft, mission-override via
+  configure_mission -- plus closed/open Lane C agent prompts targeting the
+  avy server's own MCP tools) and
+  `packages/avy/examples/large_single_aisle_sizing/` (second airframe,
+  737-class deck at 2500 nmi).
 - `add_external_subsystem` (stretch): register upstream's OAS wingbox
   mass builder inside an Aviary run — an Aviary+OAS lane case that tests
   the composition direction none of the current 13 cases cover

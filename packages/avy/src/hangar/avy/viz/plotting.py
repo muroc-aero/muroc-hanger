@@ -21,6 +21,7 @@ AVY_PLOT_TYPES = frozenset({
     "mission_profile",
     "mass_breakdown",
     "performance_summary",
+    "payload_range",
 })
 
 _PHASE_COLORS = {
@@ -145,6 +146,60 @@ def plot_mass_breakdown(
 
 
 # ---------------------------------------------------------------------------
+# Plot: payload_range
+# ---------------------------------------------------------------------------
+
+def plot_payload_range(
+    run_id: str,
+    results: dict,
+    case_name: str = "",
+    *,
+    save_dir: str | Path | None = None,
+) -> PlotResult:
+    """Classic payload-range diagram from a run_payload_range artifact."""
+    _, plt = _require_mpl()
+
+    points = (results.get("payload_range") or {}).get("points") or []
+    points = [
+        p for p in points
+        if p.get("payload_lbm") is not None and p.get("range_nmi") is not None
+    ]
+    if len(points) < 2:
+        raise ValueError(
+            "No payload-range points in results (payload_range plots need a "
+            "run_payload_range artifact)"
+        )
+    points = sorted(points, key=lambda p: p["range_nmi"])
+
+    title = "Payload-Range Diagram"
+    if case_name:
+        title = f"{title} -- {case_name}"
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.5))
+    fig.suptitle(f"{title}\n(run_id: {run_id})", fontsize=9, y=0.99)
+
+    xs = [p["range_nmi"] for p in points]
+    ys = [p["payload_lbm"] for p in points]
+    ax.plot(xs, ys, "o-", color="#15487A", linewidth=1.5, markersize=6)
+    for p in points:
+        ax.annotate(
+            p["label"].replace("_", " "),
+            (p["range_nmi"], p["payload_lbm"]),
+            textcoords="offset points",
+            xytext=(6, 6),
+            fontsize=7,
+        )
+    ax.set_xlabel("Range (nmi)", fontsize=8)
+    ax.set_ylabel("Payload (lbm)", fontsize=8)
+    ax.set_ylim(bottom=0)
+    ax.tick_params(labelsize=7)
+    ax.grid(True, alpha=0.3)
+
+    fig.tight_layout(rect=[0, 0, 1, 0.93])
+    return _fig_to_response(fig, run_id, "payload_range", save_dir)
+
+
+# ---------------------------------------------------------------------------
 # Plot: performance_summary
 # ---------------------------------------------------------------------------
 
@@ -228,6 +283,7 @@ _DISPATCHERS = {
     "mission_profile": plot_mission_profile,
     "mass_breakdown": plot_mass_breakdown,
     "performance_summary": plot_performance_summary,
+    "payload_range": plot_payload_range,
 }
 
 

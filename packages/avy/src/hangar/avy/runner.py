@@ -5,16 +5,23 @@ upstream problem has two process-global hazards for a long-lived server:
 
 - OpenMDAO problem names collide across repeated runs in one process, so
   ``_clear_problem_names()`` must be called before each run;
-- reports and recorder files land in the *current working directory*
-  (``reports/<problem_name>/``), so each run executes inside a managed
+- reports, recorder files, and off-design ``*_out`` directories land in the
+  *current working directory*, so each run executes inside a managed
   per-run scratch directory under the artifact area.
 
 ``os.chdir`` is process-global, so runs are serialized behind a lock. All
 aviary imports are lazy (see the dependency note in pyproject.toml).
+
+Off-design and payload-range analyses need a live sized AviaryProblem, and
+no live Problem is cached in the session (same policy as hangar-pyc, whose
+off-design rebuilds and re-solves the design point every call) -- so those
+entry points re-run the sizing inside the same scratch/lock block and then
+fly the off-design mission(s) from it.
 """
 
 from __future__ import annotations
 
+import contextlib
 import os
 import threading
 from pathlib import Path
@@ -22,6 +29,12 @@ from pathlib import Path
 _RUN_LOCK = threading.Lock()
 
 VALID_OPTIMIZERS = ("SLSQP", "IPOPT", "SNOPT")
+
+# Tool-facing mission_type -> Aviary ProblemType value
+OFF_DESIGN_TYPES = {
+    "max_range": "off_design_max_range",
+    "min_fuel": "off_design_min_fuel",
+}
 
 
 def require_aviary():
@@ -57,6 +70,38 @@ def check_optimizer_available(optimizer: str) -> None:
             ) from None
 
 
+@contextlib.contextmanager
+def _scratch_run(scratch_dir: str | Path | None):
+    """Serialize the run and execute it inside the scratch cwd."""
+    from openmdao.core.problem import _clear_problem_names
+
+    scratch = Path(scratch_dir) if scratch_dir else Path.cwd()
+    scratch.mkdir(parents=True, exist_ok=True)
+
+    with _RUN_LOCK:
+        old_cwd = os.getcwd()
+        os.chdir(scratch)
+        try:
+            _clear_problem_names()
+            yield
+        finally:
+            os.chdir(old_cwd)
+
+
+def _solve_sizing(aircraft_data, phase_info, optimizer, max_iter):
+    """Run the sizing optimization; caller must hold the scratch context."""
+    from aviary.interface.run_aviary import run_aviary
+
+    return run_aviary(
+        aircraft_data,
+        phase_info,
+        optimizer=optimizer,
+        max_iter=max_iter,
+        make_plots=False,
+        verbosity=0,
+    )
+
+
 def run_sizing_problem(
     aircraft_data,
     phase_info: dict,
@@ -70,28 +115,58 @@ def run_sizing_problem(
     from a worker thread (the tools use ``asyncio.to_thread``).
     """
     require_aviary()
-    from openmdao.core.problem import _clear_problem_names
-    from aviary.interface.run_aviary import run_aviary
+    with _scratch_run(scratch_dir):
+        return _solve_sizing(aircraft_data, phase_info, optimizer, max_iter)
 
-    scratch = Path(scratch_dir) if scratch_dir else Path.cwd()
-    scratch.mkdir(parents=True, exist_ok=True)
 
-    with _RUN_LOCK:
-        old_cwd = os.getcwd()
-        os.chdir(scratch)
-        try:
-            _clear_problem_names()
-            prob = run_aviary(
-                aircraft_data,
-                phase_info,
-                optimizer=optimizer,
-                max_iter=max_iter,
-                make_plots=False,
-                verbosity=0,
-            )
-        finally:
-            os.chdir(old_cwd)
-    return prob
+def run_off_design_problem(
+    aircraft_data,
+    phase_info: dict,
+    mission_type: str,
+    optimizer: str = "SLSQP",
+    max_iter: int = 50,
+    scratch_dir: str | Path | None = None,
+    **off_design_kwargs,
+):
+    """Size the aircraft, then fly an off-design mission from the sized design.
+
+    ``mission_type`` is a key of ``OFF_DESIGN_TYPES``. ``off_design_kwargs``
+    are forwarded to ``AviaryProblem.run_off_design_mission`` (e.g.
+    ``mission_range``, ``mission_gross_mass``, ``cargo_mass``, ``num_pax``).
+    Returns ``(sizing_prob, off_design_prob)``. Blocking.
+    """
+    require_aviary()
+    problem_type = OFF_DESIGN_TYPES[mission_type]
+
+    with _scratch_run(scratch_dir):
+        sizing_prob = _solve_sizing(aircraft_data, phase_info, optimizer, max_iter)
+        od_prob = sizing_prob.run_off_design_mission(
+            problem_type=problem_type,
+            optimizer=optimizer,
+            verbosity=0,
+            **off_design_kwargs,
+        )
+    return sizing_prob, od_prob
+
+
+def run_payload_range_problem(
+    aircraft_data,
+    phase_info: dict,
+    optimizer: str = "SLSQP",
+    max_iter: int = 50,
+    scratch_dir: str | Path | None = None,
+):
+    """Size the aircraft, then run the payload-range off-design missions.
+
+    Returns ``(sizing_prob, (max_fuel_payload_prob, ferry_prob))``; the inner
+    tuple is empty when upstream skips the analysis (unconverged sizing).
+    Blocking; roughly 3x a plain sizing run.
+    """
+    require_aviary()
+    with _scratch_run(scratch_dir):
+        sizing_prob = _solve_sizing(aircraft_data, phase_info, optimizer, max_iter)
+        pr_probs = sizing_prob.run_payload_range(verbosity=0)
+    return sizing_prob, pr_probs
 
 
 def load_deck(deck_path: str, overrides: dict | None = None):

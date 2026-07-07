@@ -56,6 +56,30 @@ visualize(run_id, "mass_breakdown")
 export_session_graph()
 ```
 
+## 5. Off-design missions from a sized aircraft
+
+```
+start_session(notes="Off-design study")
+load_aircraft_template(template="advanced_single_aisle")
+run_sizing(run_name="design mission")
+run_off_design(mission_type="max_range", run_name="ferry-ish: how far at design TOGM")
+run_off_design(mission_type="min_fuel", mission_range_nm=1200,
+               run_name="short leg: fuel for 1200 nmi")
+# compare results.performance vs results.design_point in each envelope
+log_decision(decision_type="result_interpretation", reasoning="...")
+export_session_graph()
+```
+
+## 6. Payload-range diagram
+
+```
+start_session(notes="Payload-range")
+load_aircraft_template(template="advanced_single_aisle")
+run_payload_range(run_name="PR diagram")
+visualize(run_id, "payload_range")
+export_session_graph()
+```
+
 ## Failure playbook
 
 - `optimizer.success` finding failed: increase `max_iter`, simplify the

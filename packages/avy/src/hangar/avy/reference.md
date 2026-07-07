@@ -84,6 +84,36 @@ Results envelope:
   (`time_s`, `altitude_ft`, `mach`, `mass_lbm`, `distance_nmi`, `throttle`,
   `phase`)
 
+## run_off_design
+
+Flies a mission with the sized design held fixed (design gross mass and
+empty mass from the sizing). Re-runs the sizing internally (~2x run_sizing
+wall-clock; no live problem is cached in the session).
+
+| Parameter | Type | Default | Notes |
+|---|---|---|---|
+| aircraft_name | str | "aircraft" | |
+| mission_type | str | "max_range" | 'max_range' (fixed fuel, maximize range) or 'min_fuel' (fixed range, minimize fuel) |
+| mission_range_nm | float | None | REQUIRED for 'min_fuel'; unused otherwise |
+| mission_gross_mass_lbm | float | None | Mission TOGM; defaults to design gross mass |
+| cargo_mass_lbm | float | None | Cargo override for this mission |
+| num_pax | int | None | Passenger count override |
+| optimizer / max_iter | | SLSQP / 50 | Same semantics as run_sizing |
+
+Results describe the off-design mission; the sizing headline metrics are
+attached under `results.design_point` (check its `optimizer_success` too).
+
+## run_payload_range
+
+Runs the sizing plus two extra off-design missions to produce the 4-point
+payload-range diagram (max payload @ 0 range, design mission, max fuel +
+payload, ferry range). ~3x run_sizing wall-clock; energy_state only;
+reserve fuel not yet accounted for (upstream limitation). Errors if the
+sizing did not converge.
+
+Results: `results.payload_range.points` = `[{label, payload_lbm,
+range_nmi}, ...]` plus the sizing performance block.
+
 ## visualize
 
 | plot_type | Shows |
@@ -91,6 +121,7 @@ Results envelope:
 | mission_profile | altitude, Mach, mass, throttle vs range (2x2, phase-colored) |
 | mass_breakdown | gross / zero-fuel / operating / fuel bars |
 | performance_summary | table card of all key sizing metrics |
+| payload_range | 4-point payload-range diagram (run_payload_range artifacts) |
 
 ## Requirements paths (set_requirements)
 

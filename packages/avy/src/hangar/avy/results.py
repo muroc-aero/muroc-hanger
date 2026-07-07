@@ -65,6 +65,41 @@ def extract_sizing_results(prob, phase_names: list[str]) -> dict:
     }
 
 
+def extract_payload_range_points(sizing_prob, pr_probs) -> list[dict]:
+    """Extract the four payload-range diagram points.
+
+    Mirrors upstream ``run_payload_range``: (1) max payload at zero range,
+    (2) the design mission, (3) max fuel + payload, (4) ferry range.
+    ``pr_probs`` is the (max_fuel_payload_prob, ferry_prob) tuple it returns;
+    empty when the analysis was skipped.
+    """
+    from aviary.variable_info.variables import Aircraft, Mission
+
+    max_payload = _get_scalar(
+        sizing_prob, Aircraft.CrewPayload.TOTAL_PAYLOAD_MASS, "lbm"
+    )
+    points = [
+        {"label": "max_payload", "payload_lbm": max_payload, "range_nmi": 0.0},
+        {
+            "label": "design_mission",
+            "payload_lbm": max_payload,
+            "range_nmi": _get_scalar(sizing_prob, Mission.RANGE, "nmi"),
+        },
+    ]
+    labels = ("max_fuel_plus_payload", "ferry_range")
+    for label, prob in zip(labels, pr_probs):
+        points.append(
+            {
+                "label": label,
+                "payload_lbm": _get_scalar(
+                    prob, Aircraft.CrewPayload.TOTAL_PAYLOAD_MASS, "lbm"
+                ),
+                "range_nmi": _get_scalar(prob, Mission.RANGE, "nmi"),
+            }
+        )
+    return points
+
+
 def extract_timeseries(prob, phase_names: list[str]) -> dict:
     """Concatenated per-phase timeseries, downsampled, as JSON-safe lists."""
     series: dict[str, list] = {key: [] for key in _TIMESERIES_CHANNELS}

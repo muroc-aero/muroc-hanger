@@ -1,24 +1,33 @@
 # single_aisle_sizing -- Aviary parity example
 
-The same engineering problem -- size the advanced single-aisle transport
-(FLOPS mass + aero) on the default 3-phase energy_state mission with a
-1906 nmi range constraint, under SLSQP -- solved through each lane
-(see `docs/parity-lanes-and-agent-eval.md`):
+The same engineering problems solved through each lane (see
+`docs/parity-lanes-and-agent-eval.md`): the advanced single-aisle transport
+(FLOPS mass + aero) on energy_state missions under SLSQP.
 
-- **Lane A** (`lane_a/sizing.py`): raw Aviary Level 1 (`run_aviary`), no
-  hangar code. The reference, pinned to `GOLDEN` anchors from Aviary v1.0.1.
-- **Lane B** (`lane_b/sizing.json`): the identical problem as an MCP
-  tool-call script (`load_aircraft_template -> configure_mission ->
-  run_sizing`), replayed in process through `hangar.sdk.cli.runner.run_tool`.
+Three cases, each exercising a different wrapper path:
+
+| Case | Wrapper path certified | Lane A | Lane B |
+|---|---|---|---|
+| `sizing` | template + default mission | `lane_a/sizing.py` | `lane_b/sizing.json` |
+| `override_sizing` | `define_aircraft` deck overrides (AR 11.56 -> 13.0) | `lane_a/override_sizing.py` | `lane_b/override_sizing.json` |
+| `short_mission` | `configure_mission` phase_info merge (1200 nmi, coarse cruise) | `lane_a/short_mission.py` | `lane_b/short_mission.json` |
+
+- **Lane A**: raw Aviary Level 1 (`run_aviary`), no hangar code. The
+  reference, pinned to `GOLDEN*` anchors from Aviary v1.0.1.
+- **Lane B**: the identical problem as an MCP tool-call script replayed in
+  process through `hangar.sdk.cli.runner.run_tool`. Fast contract tests
+  assert the JSON scripts carry the exact values from `shared.py`.
+- **Lane C** (`lane_c/`): closed and open agent prompts targeting the
+  Aviary server's MCP tools, scored against Lane A with the same
+  tolerances. See `lane_c/README.md` (the omd-level Lane C is blocked on
+  the numpy-2 venv split; see `docs/aviary-server-plan.md`).
 
 Parameters and tolerances live in `shared.py` (the contract). Headline
 metrics: `gross_mass_lbm`, `total_fuel_mass_lbm`, `range_nmi`,
 `final_time_min`.
 
-An omd Lane C (plan authored through `mcp__omd__*` tools by a blind agent)
-is future work -- it needs an omd `avy` factory, which cannot live in the
-main venv until the numpy-2 split is resolved (see
-`docs/aviary-server-plan.md`).
+A second airframe runs the same lanes in
+`../large_single_aisle_sizing/` (737-class deck, 2500 nmi).
 
 Run (inside the isolated Aviary venv; see `scripts/setup-avy-venv.sh`):
 
@@ -26,4 +35,4 @@ Run (inside the isolated Aviary venv; see `scripts/setup-avy-venv.sh`):
 .venv-avy/bin/python -m pytest packages/avy/examples/single_aisle_sizing/tests/ -v --rootdir=.
 ```
 
-Each lane takes ~20 s; the full suite is ~1.5 min.
+Each lane run takes ~15-20 s; the full suite is ~4 min.

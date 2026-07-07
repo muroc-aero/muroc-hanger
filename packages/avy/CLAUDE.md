@@ -23,6 +23,9 @@ root (`bash scripts/setup-avy-venv.sh`: hangar-sdk + hangar-avy + editable
 - EVERY Aviary run is an optimizer run (dymos collocation) -- there is no
   evaluate-only path. Hence the tool is `run_sizing`, not
   `run_mission_analysis`. ~20 s for the default 3-phase mission.
+- `run_off_design` (max_range/min_fuel) and `run_payload_range` need a live
+  sized problem; none is cached (pyc precedent), so they re-run the sizing
+  internally -- ~2x / ~3x run_sizing wall-clock.
 - Optimizer non-convergence does NOT raise; it returns the last iterate
   with `prob.result.success == False`. The `optimizer.success` validation
   finding is the load-bearing check.
@@ -55,6 +58,7 @@ uv run pytest packages/avy/tests/ -m "not slow"
 # Full suite incl. sizing runs + golden anchors (isolated venv)
 .venv-avy/bin/python -m pytest packages/avy/tests/ -v
 
-# Lane A/B parity example
+# Lane A/B parity examples (run each directory separately)
 .venv-avy/bin/python -m pytest packages/avy/examples/single_aisle_sizing/tests/ -v --rootdir=.
+.venv-avy/bin/python -m pytest packages/avy/examples/large_single_aisle_sizing/tests/ -v --rootdir=.
 ```

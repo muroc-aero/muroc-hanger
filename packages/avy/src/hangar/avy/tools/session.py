@@ -127,7 +127,9 @@ async def reset(
 
 async def list_artifacts(
     session_id: Annotated[str | None, "Filter by session"] = None,
-    analysis_type: Annotated[str | None, "Filter: 'sizing'"] = None,
+    analysis_type: Annotated[
+        str | None, "Filter: 'sizing', 'off_design', 'payload_range'"
+    ] = None,
     project: Annotated[str | None, "Filter by project"] = None,
 ) -> dict:
     """Browse saved analysis runs.
@@ -284,7 +286,8 @@ async def visualize(
     run_id: Annotated[str, "Run ID to visualize"],
     plot_type: Annotated[
         str,
-        "Plot type -- one of: mission_profile, mass_breakdown, performance_summary",
+        "Plot type -- one of: mission_profile, mass_breakdown, "
+        "performance_summary, payload_range (payload-range runs only)",
     ],
     session_id: Annotated[str | None, "Session hint for faster artifact lookup"] = None,
     case_name: Annotated[str, "Human-readable label for the plot title"] = "",
@@ -303,6 +306,7 @@ async def visualize(
       mission_profile      -- altitude, Mach, mass, and throttle vs range (2x2 grid)
       mass_breakdown       -- bar chart of the sizing mass buildup
       performance_summary  -- table card with all key sizing metrics
+      payload_range        -- 4-point payload-range diagram (run_payload_range only)
 
     Output modes (set per-call via 'output', or per-session via configure_session):
       inline  -- returns [metadata, ImageContent] (default, best for claude.ai)

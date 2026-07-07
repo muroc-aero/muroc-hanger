@@ -17,7 +17,7 @@ from hangar.avy.tools.aircraft import (
     list_aircraft_templates,
     load_aircraft_template,
 )
-from hangar.avy.tools.analysis import run_sizing
+from hangar.avy.tools.analysis import run_off_design, run_payload_range, run_sizing
 from hangar.avy.tools.session import reset
 
 HAS_AVIARY = importlib.util.find_spec("aviary") is not None
@@ -79,6 +79,39 @@ async def test_run_sizing_rejects_2dof_deck():
     await load_aircraft_template(template="large_single_aisle_GASP", name="gasp")
     with pytest.raises(ValueError, match="2DOF"):
         await run_sizing(aircraft_name="gasp")
+
+
+async def test_run_off_design_requires_loaded_aircraft():
+    with pytest.raises(ValueError, match="not found"):
+        await run_off_design(aircraft_name="ghost")
+
+
+async def test_run_off_design_rejects_unknown_mission_type(single_aisle):
+    with pytest.raises(ValueError, match="Unknown mission_type"):
+        await run_off_design(aircraft_name=single_aisle, mission_type="ferry")
+
+
+async def test_run_off_design_min_fuel_requires_range(single_aisle):
+    with pytest.raises(ValueError, match="mission_range_nm"):
+        await run_off_design(aircraft_name=single_aisle, mission_type="min_fuel")
+
+
+async def test_run_off_design_rejects_negative_range(single_aisle):
+    with pytest.raises(ValueError, match="positive"):
+        await run_off_design(
+            aircraft_name=single_aisle, mission_type="min_fuel", mission_range_nm=-5.0
+        )
+
+
+async def test_run_payload_range_requires_loaded_aircraft():
+    with pytest.raises(ValueError, match="not found"):
+        await run_payload_range(aircraft_name="ghost")
+
+
+async def test_run_payload_range_rejects_2dof_deck():
+    await load_aircraft_template(template="small_single_aisle_GASP", name="gasp")
+    with pytest.raises(ValueError, match="2DOF"):
+        await run_payload_range(aircraft_name="gasp")
 
 
 async def test_configure_mission_rejects_2dof_deck():

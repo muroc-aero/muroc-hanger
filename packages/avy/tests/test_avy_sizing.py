@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 
 from hangar.avy.tools.aircraft import configure_mission
-from hangar.avy.tools.analysis import run_sizing
+from hangar.avy.tools.analysis import run_off_design, run_payload_range, run_sizing
 from hangar.avy.tools.session import get_detailed_results, visualize
 
 
@@ -64,3 +64,48 @@ async def test_run_sizing_with_target_range_and_plots(single_aisle):
     assert detail["results"]["gross_mass_lbm"] == pytest.approx(
         perf["gross_mass_lbm"]
     )
+
+
+@pytest.mark.slow
+async def test_run_off_design_min_fuel(single_aisle):
+    pytest.importorskip("aviary")
+
+    env = await run_off_design(
+        aircraft_name=single_aisle,
+        mission_type="min_fuel",
+        mission_range_nm=1200.0,
+        run_name="min fuel 1200",
+    )
+
+    assert env["validation"]["passed"], env["validation"]
+    perf = env["results"]["performance"]
+    design = env["results"]["design_point"]
+
+    # Flies exactly the requested range with the 1906-nmi design held fixed
+    assert perf["range_nmi"] == pytest.approx(1200.0, rel=1e-6)
+    assert design["range_nmi"] == pytest.approx(1906.0, rel=1e-6)
+    assert design["optimizer_success"] is True
+    # Shorter leg burns less than the design mission's fuel
+    assert perf["total_fuel_mass_lbm"] < design["total_fuel_mass_lbm"]
+
+
+@pytest.mark.slow
+async def test_run_payload_range(single_aisle):
+    pytest.importorskip("aviary")
+
+    env = await run_payload_range(aircraft_name=single_aisle, run_name="PR")
+
+    assert env["validation"]["passed"], env["validation"]
+    points = env["results"]["payload_range"]["points"]
+    assert [p["label"] for p in points] == [
+        "max_payload", "design_mission", "max_fuel_plus_payload", "ferry_range",
+    ]
+    ranges = [p["range_nmi"] for p in points]
+    payloads = [p["payload_lbm"] for p in points]
+    # Classic diagram shape: ranges increase, payload non-increasing
+    assert ranges == sorted(ranges)
+    assert payloads == sorted(payloads, reverse=True)
+    assert all(env["results"]["payload_range"]["off_design_success"])
+
+    out = await visualize(env["run_id"], "payload_range", output="file")
+    assert out[0].get("file_path")

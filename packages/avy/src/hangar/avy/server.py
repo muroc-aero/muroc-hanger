@@ -30,7 +30,7 @@ from hangar.avy.tools.aircraft import (
     list_aircraft_templates,
     load_aircraft_template,
 )
-from hangar.avy.tools.analysis import run_sizing
+from hangar.avy.tools.analysis import run_off_design, run_payload_range, run_sizing
 from hangar.avy.tools.session import (
     configure_session,
     delete_artifact,
@@ -61,6 +61,12 @@ from hangar.sdk.viz.viewer_server import register_plot_generator, register_plot_
 register_plot_types("sizing", [
     "mission_profile", "mass_breakdown", "performance_summary",
 ])
+register_plot_types("off_design", [
+    "mission_profile", "mass_breakdown", "performance_summary",
+])
+register_plot_types("payload_range", [
+    "payload_range", "mission_profile", "mass_breakdown", "performance_summary",
+])
 register_plot_generator(AVY_PLOT_TYPES, generate_avy_plot)
 
 # ---------------------------------------------------------------------------
@@ -88,7 +94,11 @@ REQUIRED WORKFLOW -- always follow this order:
      configure_mission        -- (optional) set range / phases; defaults used if skipped
   3. run_sizing               -- coupled sizing + mission optimization (~20 s - minutes)
      log_decision             -- interpret results (decision_type="result_interpretation")
+     run_off_design           -- (optional) fly max_range/min_fuel missions with the
+                                 sized design (re-runs the sizing internally, ~2x)
+     run_payload_range        -- (optional) 4-point payload-range diagram (~3x)
   4. visualize                -- mission_profile / mass_breakdown / performance_summary
+                                 / payload_range (payload-range runs only)
   5. export_session_graph     -- save the provenance DAG at workflow end
   6. reset (optional)         -- clear state between unrelated experiments
 
@@ -149,6 +159,8 @@ mcp.tool()(capture_tool(configure_mission))
 # ---------------------------------------------------------------------------
 
 mcp.tool()(capture_tool(run_sizing))
+mcp.tool()(capture_tool(run_off_design))
+mcp.tool()(capture_tool(run_payload_range))
 mcp.tool()(capture_tool(reset))
 
 # ---------------------------------------------------------------------------
