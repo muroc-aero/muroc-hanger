@@ -3,7 +3,8 @@
 ## What this is
 omd materializes YAML analysis plans into OpenMDAO problems, runs them, and
 records results with PROV-Agent provenance tracking. It uses a factory registry
-to support different component types (OAS aero, OAS aerostruct, pyCycle, paraboloid)
+to support different component types (OAS aero, OAS aerostruct, pyCycle, paraboloid,
+and Aviary sizing via the avy/Sizing subprocess factory into .venv-avy)
 and a plot provider registry so each factory brings its own visualization.
 
 ## Architecture

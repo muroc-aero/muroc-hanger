@@ -50,7 +50,7 @@ See `packages/omd/CLAUDE.md` for detailed omd architecture.
 - `run.py` -- plan execution pipeline (load, materialize, execute, record, N2)
 - `materializer.py` -- converts plan YAML to OpenMDAO Problem with DVs/constraints/objective
 - `registry.py` -- factory + plot provider registry
-- `factories/` -- component builders (oas.py, oas_aero.py, paraboloid.py)
+- `factories/` -- component builders (oas.py, oas_aero.py, paraboloid.py, avy.py subprocess black box into .venv-avy)
 - `plotting/` -- factory-aware plot generation matching oas-cli style
 - `db.py` -- SQLite analysis DB (provenance, run cases, metadata)
 - `recorder.py` -- OpenMDAO CaseReader data import

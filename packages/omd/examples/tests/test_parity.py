@@ -485,3 +485,73 @@ class TestOCPThreeToolParity:
         assert result["summary"]["fuel_burn_kg"] == pytest.approx(
             lane_a["fuel_burn_kg"], rel=1e-3,
         )
+
+
+# ── Aviary (subprocess factory into .venv-avy) ───────────────────────────
+
+AVY_PYTHON = Path(__file__).resolve().parents[4] / ".venv-avy" / "bin" / "python"
+requires_avy_venv = pytest.mark.skipif(
+    not AVY_PYTHON.exists(),
+    reason="needs the isolated Aviary venv (bash scripts/setup-avy-venv.sh)",
+)
+
+
+@requires_avy_venv
+class TestAvySingleAisleParity:
+
+    @pytest.mark.slow
+    def test_sizing_parity(self, tmp_path):
+        sys.path.insert(0, str(EXAMPLES_DIR / "avy_single_aisle"))
+        from avy_single_aisle.lane_a.sizing import run as lane_a_run
+        from avy_single_aisle.shared import GOLDEN, METRICS, TOL_GOLDEN, TOL_PARITY
+
+        lane_a = lane_a_run()
+
+        plan_path = (
+            EXAMPLES_DIR / "avy_single_aisle" / "lane_b" / "sizing" / "plan.yaml"
+        )
+        result = run_plan(plan_path, mode="analysis", recording_level="minimal",
+                          db_path=tmp_path / "analysis.db")
+
+        _print_comparison("Aviary Single-Aisle Sizing (energy_state, 1906 nmi)",
+                          lane_a, result["summary"], keys=METRICS,
+                          case="avy_single_aisle")
+
+        assert result["status"] in ("completed", "converged")
+        # Aviary optimizer non-convergence does not raise; the component
+        # surfaces it as the converged output.
+        assert result["summary"]["converged"] == 1.0
+        # Lane B's subprocess worker solves the same problem Lane A's
+        # script does -> agree to round-off.
+        for k in METRICS:
+            assert result["summary"][k] == pytest.approx(lane_a[k], **TOL_PARITY)
+        # Physics anchor: Lane A reproduces the pinned v1.0.1 goldens.
+        for k, gold in GOLDEN.items():
+            assert lane_a[k] == pytest.approx(gold, **TOL_GOLDEN)
+
+
+@requires_avy_venv
+class TestAvyBwbParity:
+
+    @pytest.mark.slow
+    def test_sizing_parity(self, tmp_path):
+        sys.path.insert(0, str(EXAMPLES_DIR / "avy_bwb"))
+        from avy_bwb.lane_a.sizing import run as lane_a_run
+        from avy_bwb.shared import GOLDEN, METRICS, TOL_GOLDEN, TOL_PARITY
+
+        lane_a = lane_a_run()
+
+        plan_path = EXAMPLES_DIR / "avy_bwb" / "lane_b" / "sizing" / "plan.yaml"
+        result = run_plan(plan_path, mode="analysis", recording_level="minimal",
+                          db_path=tmp_path / "analysis.db")
+
+        _print_comparison("Aviary BWB Sizing (upstream benchmark, fixed profile)",
+                          lane_a, result["summary"], keys=METRICS,
+                          case="avy_bwb")
+
+        assert result["status"] in ("completed", "converged")
+        assert result["summary"]["converged"] == 1.0
+        for k in METRICS:
+            assert result["summary"][k] == pytest.approx(lane_a[k], **TOL_PARITY)
+        for k, gold in GOLDEN.items():
+            assert lane_a[k] == pytest.approx(gold, **TOL_GOLDEN)

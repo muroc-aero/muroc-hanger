@@ -277,18 +277,25 @@ optimizer, `max_iter`, `num_segments`, and transcription order in
 
 ### omd factory + cross-tool
 
-- omd `avy` factory (`packages/omd/factories/avy.py`): builds the Aviary
-  problem via the Level 2 sequence, upstream imports only (no hangar-avy
-  dependency, like `factories/ocp/`). Design note: Aviary owns its own
-  driver/DVs/objective, which collides with the omd materializer's
-  DV/objective wiring — the factory exposes the case as a
-  **self-driving component** (plan `mode: analysis` runs the embedded
-  optimization; plan-level DVs limited to deck scalars for sweeps/DOE),
-  mirroring how evt's sizing iteration is wrapped.
-  **Blocked by the numpy-2 split**: omd runs in the main venv, which
-  cannot import aviary, so the factory (and with it the omd-level Lane B/C
-  for this case) waits on the openconcept numpy cap. The per-tool parity
-  coverage until then (all implemented):
+- omd `avy/Sizing` factory (`packages/omd/src/hangar/omd/factories/avy.py`)
+  — **implemented as a subprocess black box**, dissolving the numpy-2
+  blocker: the component's `compute` writes a JSON spec and executes
+  `avy_worker.py` with the isolated `.venv-avy` interpreter (the same
+  external-solver pattern the vsp plan uses for VSPAERO), so omd's main
+  venv never imports aviary. Subprocess isolation also removes the
+  cwd/problem-name hazards the in-process server locks around. As
+  designed, the component is **self-driving** (plan `mode: analysis` runs
+  the embedded dymos+SLSQP optimization; `converged` output mirrors the
+  evt black box) with `target_range_nm` as the one sweepable input
+  (FD partials, ~20 s per evaluation — sweeps/DOE, not gradient opt).
+  omd-level parity cases `packages/omd/examples/avy_single_aisle/` and
+  `avy_bwb/` (Lane A = the per-tool raw-Aviary reference scripts run in
+  `.venv-avy`; Lane B = the plan pipeline; Lane C = scripted tool-surface
+  test + closed/open agent prompts) are wired into the omd parity suites,
+  **skip-gated on `.venv-avy` existing** — they run locally, not in CI,
+  and are therefore not in the paper's 13-case table. An *in-process*
+  factory (analytic derivatives through Aviary) still waits on the
+  openconcept numpy cap. The per-tool parity coverage (all implemented):
   `packages/avy/examples/single_aisle_sizing/` (three cases -- default
   sizing, deck-override via define_aircraft, mission-override via
   configure_mission -- plus closed/open Lane C agent prompts targeting the
