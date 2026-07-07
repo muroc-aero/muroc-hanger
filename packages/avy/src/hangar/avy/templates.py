@@ -49,6 +49,15 @@ AIRCRAFT_TEMPLATES: dict[str, dict] = {
         "mass_method": "GASP",
         "mission_method": "energy_state",
     },
+    "bwb_FLOPS": {
+        "deck": "models/aircraft/blended_wing_body/bwb_simple_FLOPS.csv",
+        "description": "Blended wing body (simple FLOPS deck, ~875 klb class), "
+        "energy_state. Pair with mission_template='bwb_bench' (M0.85, 7750 nmi) "
+        "-- the default mission's transonic single-aisle profile does not suit "
+        "a BWB.",
+        "mass_method": "FLOPS",
+        "mission_method": "energy_state",
+    },
     # GASP 2DOF decks -- listed for discovery; mission wiring is energy_state
     # only for now, so configure_mission rejects these with a clear error.
     "large_single_aisle_GASP": {

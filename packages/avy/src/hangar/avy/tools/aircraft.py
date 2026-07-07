@@ -9,6 +9,7 @@ from hangar.avy.config.defaults import DEFAULT_MISSION_METHOD
 from hangar.avy.templates import AIRCRAFT_TEMPLATES, get_template
 from hangar.avy.missions import (
     MISSION_METHODS,
+    MISSION_TEMPLATES,
     build_phase_info,
     summarize_phase_info,
 )
@@ -117,6 +118,14 @@ async def configure_mission(
         "Equations-of-motion family. Currently only 'energy_state' "
         "(FLOPS-style height-energy) is supported.",
     ] = DEFAULT_MISSION_METHOD,
+    mission_template: Annotated[
+        str,
+        "Upstream phase_info template to start from. Valid: "
+        + ", ".join(sorted(MISSION_TEMPLATES))
+        + ". 'energy_state_default' is the SLSQP-friendly fixed-profile "
+        "default; the others are Aviary's own model/benchmark missions "
+        "(detailed takeoff, mach/altitude-optimized phases).",
+    ] = "energy_state_default",
     target_range_nm: Annotated[
         float | None,
         "Design mission range (nmi). Sets post_mission constrain_range + target_range.",
@@ -139,9 +148,10 @@ async def configure_mission(
 ) -> dict:
     """Configure the mission (phase_info) for an aircraft.
 
-    Builds the phase_info from the mission-method default (climb/cruise/descent
-    for energy_state) plus the given overrides, and stores it on the aircraft.
-    Calling again rebuilds from the defaults (overrides do not accumulate).
+    Builds the phase_info from an upstream mission template
+    ('energy_state_default' unless chosen otherwise) plus the given
+    overrides, and stores it on the aircraft. Calling again rebuilds from
+    the template (overrides do not accumulate).
     """
     session = _sessions.get(session_id)
     aircraft_cfg = validate_aircraft_exists(session, aircraft_name)
@@ -155,6 +165,7 @@ async def configure_mission(
 
     phase_info = build_phase_info(
         mission_method=mission_method,
+        mission_template=mission_template,
         target_range_nm=target_range_nm,
         include_takeoff=include_takeoff,
         include_landing=include_landing,
@@ -163,6 +174,7 @@ async def configure_mission(
 
     aircraft_cfg["mission"] = {
         "mission_method": mission_method,
+        "mission_template": mission_template,
         "target_range_nm": target_range_nm,
         "phase_info": phase_info,
     }
@@ -170,6 +182,7 @@ async def configure_mission(
     return {
         "aircraft_name": aircraft_name,
         "mission_method": mission_method,
+        "mission_template": mission_template,
         "target_range_nm": target_range_nm,
         "phases": summarize_phase_info(phase_info),
         "status": f"Mission configured for '{aircraft_name}'. Call run_sizing.",

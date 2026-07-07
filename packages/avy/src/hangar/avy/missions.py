@@ -18,6 +18,36 @@ from typing import Any
 
 MISSION_METHODS = ("energy_state",)
 
+# Mission templates resolve to phase_info dicts shipped by upstream Aviary
+# itself (module attribute ``phase_info``) -- the same single-source policy
+# as the aircraft template decks. All are energy_state missions. Missions
+# that use richer phase features (detailed takeoff, mach/altitude
+# optimization, initial guesses) can only come in through a template;
+# phase_options overrides then merge onto the chosen template with the
+# same strict key validation.
+MISSION_TEMPLATES: dict[str, dict] = {
+    "energy_state_default": {
+        "module": "aviary.models.missions.energy_state_default",
+        "description": "3-phase climb/cruise/descent, fixed mach/altitude "
+        "profile, no takeoff/landing. The safe SLSQP-friendly default.",
+    },
+    "advanced_single_aisle": {
+        "module": "aviary.models.aircraft.advanced_single_aisle.phase_info",
+        "description": "The advanced single aisle model's own mission: "
+        "detailed takeoff, mach/altitude-optimized climb, 3380 nmi.",
+    },
+    "GwFm_bench": {
+        "module": "aviary.validation_cases.validation_data.test_models.GwFm_phase_info",
+        "description": "The upstream GwFm benchmark mission (GASP-mass deck, "
+        "energy_state): detailed takeoff, mach/altitude-optimized phases, 3360 nmi.",
+    },
+    "bwb_bench": {
+        "module": "aviary.validation_cases.benchmark_tests.test_bwb_FwFm",
+        "description": "The upstream blended-wing-body benchmark mission: "
+        "M0.85 cruise, 7750 nmi transpacific, BWB aero tables.",
+    },
+}
+
 # phase_info values that upstream expresses as (value, units) tuples. When an
 # override provides a bare number for one of these, it is wrapped with the
 # default's units; a [value, units] pair overrides both.
@@ -29,20 +59,29 @@ def _suggest(key: str, valid) -> str:
     return f" Did you mean {close[0]!r}?" if close else ""
 
 
-def default_phase_info(mission_method: str = "energy_state") -> dict:
-    """Return a deep copy of the upstream default phase_info for the method."""
+def default_phase_info(
+    mission_method: str = "energy_state",
+    mission_template: str = "energy_state_default",
+) -> dict:
+    """Return a deep copy of an upstream phase_info template."""
     if mission_method not in MISSION_METHODS:
         raise ValueError(
             f"Unsupported mission_method {mission_method!r}. Supported: "
             f"{', '.join(MISSION_METHODS)}. (2DOF/GASP missions are not wired "
             f"up in this server yet.)"
         )
+    if mission_template not in MISSION_TEMPLATES:
+        valid = ", ".join(sorted(MISSION_TEMPLATES))
+        raise ValueError(
+            f"Unknown mission_template {mission_template!r}. Valid: {valid}."
+            f"{_suggest(mission_template, MISSION_TEMPLATES)}"
+        )
     from hangar.avy.runner import require_aviary
 
     require_aviary()
     import importlib
 
-    mod = importlib.import_module("aviary.models.missions.energy_state_default")
+    mod = importlib.import_module(MISSION_TEMPLATES[mission_template]["module"])
     return copy.deepcopy(mod.phase_info)
 
 
@@ -75,19 +114,21 @@ def _merge_options(target: dict, overrides: dict, context: str) -> None:
 
 def build_phase_info(
     mission_method: str = "energy_state",
+    mission_template: str = "energy_state_default",
     target_range_nm: float | None = None,
     include_takeoff: bool | None = None,
     include_landing: bool | None = None,
     phase_options: dict[str, dict[str, Any]] | None = None,
 ) -> dict:
-    """Build a validated phase_info dict from the method default + overrides.
+    """Build a validated phase_info dict from an upstream template + overrides.
 
     ``phase_options`` maps phase name -> user_options overrides, e.g.
     ``{"cruise": {"num_segments": 3, "mach_final": 0.75}}``. Option names are
-    validated against the default phase's user_options; (value, units) tuple
-    slots accept a bare number (default units kept) or a [value, units] pair.
+    validated against the chosen template's user_options; (value, units)
+    tuple slots accept a bare number (template units kept) or a
+    [value, units] pair.
     """
-    phase_info = default_phase_info(mission_method)
+    phase_info = default_phase_info(mission_method, mission_template)
 
     if include_takeoff is not None:
         phase_info["pre_mission"]["include_takeoff"] = bool(include_takeoff)
