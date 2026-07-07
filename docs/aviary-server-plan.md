@@ -317,7 +317,10 @@ optimizer, `max_iter`, `num_segments`, and transcription order in
 - `add_external_subsystem` (stretch): register upstream's OAS wingbox
   mass builder inside an Aviary run — an Aviary+OAS lane case that tests
   the composition direction none of the current 13 cases cover
-  (upstream tool consuming a hangar-wrapped tool's library).
+  (upstream tool consuming a hangar-wrapped tool's library). Now planned
+  in detail (feasibility spike verified: OAS v2.12.0 installs and runs
+  under numpy 2 in `.venv-avy`) — see
+  `docs/aviary-oas-integration-plan.md`.
 - OCP-vs-Aviary cross-check study (omd study YAML): same
   payload/range/cruise on `large_single_aisle_1` vs OCP `b738` — a
   documented methods-comparison demo, not a parity case (different
