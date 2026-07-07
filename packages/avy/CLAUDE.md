@@ -61,4 +61,5 @@ uv run pytest packages/avy/tests/ -m "not slow"
 # Lane A/B parity examples (run each directory separately)
 .venv-avy/bin/python -m pytest packages/avy/examples/single_aisle_sizing/tests/ -v --rootdir=.
 .venv-avy/bin/python -m pytest packages/avy/examples/large_single_aisle_sizing/tests/ -v --rootdir=.
+.venv-avy/bin/python -m pytest packages/avy/examples/bwb_sizing/tests/ -v --rootdir=.
 ```

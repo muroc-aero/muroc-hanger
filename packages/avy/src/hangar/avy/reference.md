@@ -42,10 +42,21 @@ climb/cruise/descent) plus overrides. Re-calling rebuilds from defaults.
 |---|---|---|---|
 | aircraft_name | str | "aircraft" | |
 | mission_method | str | "energy_state" | Only energy_state currently |
+| mission_template | str | "energy_state_default" | Upstream phase_info to start from (below) |
 | target_range_nm | float | None | Sets constrain_range + target_range |
 | include_takeoff | bool | None | Detailed takeoff phase in pre_mission |
 | include_landing | bool | None | Detailed landing phase in post_mission |
-| phase_options | dict | None | Per-phase user_options overrides, validated |
+| phase_options | dict | None | Per-phase user_options overrides, validated against the template |
+
+Mission templates (phase_info sources; all energy_state):
+
+| Template | Source | SLSQP? |
+|---|---|---|
+| `energy_state_default` | aviary default 3-phase mission | yes |
+| `bwb_fixed` | BWB benchmark mission, fixed profile (hangar adaptation) | yes (~12 s) |
+| `advanced_single_aisle` | the model's own mission (takeoff, mach-optimized) | NO -- IPOPT/SNOPT |
+| `GwFm_bench` | upstream GwFm benchmark mission (GASP decks) | NO -- IPOPT/SNOPT |
+| `bwb_bench` | upstream BWB benchmark mission (profile-optimized) | NO -- IPOPT/SNOPT |
 
 phase_options example:
 

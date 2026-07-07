@@ -292,9 +292,21 @@ optimizer, `max_iter`, `num_segments`, and transcription order in
   `packages/avy/examples/single_aisle_sizing/` (three cases -- default
   sizing, deck-override via define_aircraft, mission-override via
   configure_mission -- plus closed/open Lane C agent prompts targeting the
-  avy server's own MCP tools) and
+  avy server's own MCP tools),
   `packages/avy/examples/large_single_aisle_sizing/` (second airframe,
-  737-class deck at 2500 nmi).
+  737-class deck at 2500 nmi), and
+  `packages/avy/examples/bwb_sizing/` (the upstream BWB benchmark brought
+  into the lanes: fixed-profile adaptation of its M0.85/7750 nmi mission
+  via the `bwb_fixed` mission template, cross-anchored to the published
+  SNOPT benchmark masses at 2%).
+  **Upstream benchmark coverage note:** the raw upstream benchmark
+  missions (FwFm/GwFm/GwGm bench tests, model phase_infos with detailed
+  takeoff and mach/altitude-optimized profiles) all require IPOPT/SNOPT --
+  verified to not converge under SLSQP -- and the 2DOF (Gm) family needs
+  mission wiring this server doesn't have. They are exposed as mission
+  templates (`GwFm_bench`, `advanced_single_aisle`, `bwb_bench`) for
+  pyoptsparse users, with parity examples to follow if a CI leg gains
+  IPOPT.
 - `add_external_subsystem` (stretch): register upstream's OAS wingbox
   mass builder inside an Aviary run — an Aviary+OAS lane case that tests
   the composition direction none of the current 13 cases cover

@@ -26,8 +26,10 @@ Parameters and tolerances live in `shared.py` (the contract). Headline
 metrics: `gross_mass_lbm`, `total_fuel_mass_lbm`, `range_nmi`,
 `final_time_min`.
 
-A second airframe runs the same lanes in
-`../large_single_aisle_sizing/` (737-class deck, 2500 nmi).
+Sibling examples run the same lanes on other airframes:
+`../large_single_aisle_sizing/` (737-class deck, 2500 nmi) and
+`../bwb_sizing/` (the upstream BWB benchmark, cross-anchored to its
+published SNOPT values).
 
 Run (inside the isolated Aviary venv; see `scripts/setup-avy-venv.sh`):
 

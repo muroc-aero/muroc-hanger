@@ -45,7 +45,9 @@ AIRCRAFT_TEMPLATES: dict[str, dict] = {
     "bench_GwFm": {
         "deck": "validation_cases/validation_data/test_models/aircraft_for_bench_GwFm.csv",
         "description": "Upstream benchmark deck: GASP mass/aero + energy_state "
-        "mission (GwFm).",
+        "mission (GwFm). GASP aero rejects the default mission's aero options "
+        "-- pair with mission_template='GwFm_bench', which needs IPOPT/SNOPT "
+        "(SLSQP does not converge it).",
         "mass_method": "GASP",
         "mission_method": "energy_state",
     },

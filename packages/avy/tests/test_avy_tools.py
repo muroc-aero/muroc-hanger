@@ -259,6 +259,29 @@ async def test_configure_mission_rejects_unknown_option(single_aisle):
         )
 
 
+async def test_configure_mission_rejects_unknown_template(single_aisle):
+    pytest.importorskip("aviary")
+    with pytest.raises(ValueError, match="Unknown mission_template"):
+        await configure_mission(
+            aircraft_name=single_aisle, mission_template="bwb_fixd"
+        )
+
+
+async def test_configure_mission_bwb_fixed_template():
+    """The bwb_fixed template loads and has the fixed-profile adaptation applied."""
+    pytest.importorskip("aviary")
+    await load_aircraft_template(template="bwb_FLOPS", name="bwb")
+    result = await configure_mission(aircraft_name="bwb", mission_template="bwb_fixed")
+    from hangar.avy.state import sessions
+
+    mission = sessions.get("default").aircraft["bwb"]["mission"]
+    assert mission["mission_template"] == "bwb_fixed"
+    climb = mission["phase_info"]["climb"]["user_options"]
+    assert climb["mach_optimize"] is False
+    assert climb["mach_final"] == (0.85, "unitless")
+    assert result["phases"]["cruise"]["mach_initial"] == [0.85, "unitless"]
+
+
 async def test_configure_mission_rejects_units_pair_on_unitless_option(single_aisle):
     pytest.importorskip("aviary")
     with pytest.raises(ValueError, match="does not take units"):

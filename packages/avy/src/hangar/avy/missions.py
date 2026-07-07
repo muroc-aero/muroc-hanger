@@ -34,17 +34,27 @@ MISSION_TEMPLATES: dict[str, dict] = {
     "advanced_single_aisle": {
         "module": "aviary.models.aircraft.advanced_single_aisle.phase_info",
         "description": "The advanced single aisle model's own mission: "
-        "detailed takeoff, mach/altitude-optimized climb, 3380 nmi.",
+        "detailed takeoff, mach/altitude-optimized climb, 3380 nmi. Needs "
+        "IPOPT/SNOPT -- SLSQP does not converge it.",
     },
     "GwFm_bench": {
         "module": "aviary.validation_cases.validation_data.test_models.GwFm_phase_info",
         "description": "The upstream GwFm benchmark mission (GASP-mass deck, "
-        "energy_state): detailed takeoff, mach/altitude-optimized phases, 3360 nmi.",
+        "energy_state): detailed takeoff, mach/altitude-optimized phases, "
+        "3360 nmi. Needs IPOPT/SNOPT -- SLSQP does not converge it.",
     },
     "bwb_bench": {
         "module": "aviary.validation_cases.benchmark_tests.test_bwb_FwFm",
         "description": "The upstream blended-wing-body benchmark mission: "
-        "M0.85 cruise, 7750 nmi transpacific, BWB aero tables.",
+        "M0.85 cruise, 7750 nmi transpacific, mach/altitude-optimized "
+        "profile. Needs IPOPT/SNOPT -- SLSQP does not converge it; use "
+        "'bwb_fixed' with SLSQP.",
+    },
+    "bwb_fixed": {
+        "module": "hangar.avy.config.missions_bwb_fixed",
+        "description": "Fixed-profile adaptation of the BWB benchmark "
+        "mission (M0.85, 7750 nmi, profile pinned): SLSQP-tractable, lands "
+        "within ~1.5% of the published SNOPT benchmark masses.",
     },
 }
 
