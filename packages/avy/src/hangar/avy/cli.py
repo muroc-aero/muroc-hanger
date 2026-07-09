@@ -18,6 +18,8 @@ def build_avy_registry() -> dict[str, Callable]:
         "load_aircraft_template",
         "define_aircraft",
         "configure_mission",
+        "list_external_subsystems",
+        "add_external_subsystem",
         "run_sizing",
         "run_off_design",
         "run_payload_range",

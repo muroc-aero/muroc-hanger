@@ -101,7 +101,7 @@ def _scratch_run(scratch_dir: str | Path | None):
             os.chdir(old_cwd)
 
 
-def _solve_sizing(aircraft_data, phase_info, optimizer, max_iter):
+def _solve_sizing(aircraft_data, phase_info, optimizer, max_iter, subsystems=()):
     """Run the sizing optimization; caller must hold the scratch context."""
     from aviary.interface.run_aviary import run_aviary
 
@@ -110,6 +110,7 @@ def _solve_sizing(aircraft_data, phase_info, optimizer, max_iter):
         phase_info,
         optimizer=optimizer,
         max_iter=max_iter,
+        subsystems=list(subsystems),
         make_plots=False,
         verbosity=0,
     )
@@ -121,15 +122,129 @@ def run_sizing_problem(
     optimizer: str = "SLSQP",
     max_iter: int = 50,
     scratch_dir: str | Path | None = None,
+    subsystems=(),
 ):
     """Run an Aviary sizing problem in a managed scratch cwd; return the problem.
 
-    ``aircraft_data`` is a deck path (str) or AviaryValues. Blocking -- call
-    from a worker thread (the tools use ``asyncio.to_thread``).
+    ``aircraft_data`` is a deck path (str) or AviaryValues. ``subsystems``
+    are materialized SubsystemBuilders joining the problem (the coupled
+    external-subsystem path). Blocking -- call from a worker thread (the
+    tools use ``asyncio.to_thread``).
     """
     require_aviary()
     with _scratch_run(scratch_dir):
-        return _solve_sizing(aircraft_data, phase_info, optimizer, max_iter)
+        return _solve_sizing(aircraft_data, phase_info, optimizer, max_iter, subsystems)
+
+
+def run_precompute_sizing_problem(
+    aircraft_data,
+    phase_info: dict,
+    subsystem_specs: list[dict],
+    optimizer: str = "SLSQP",
+    max_iter: int = 50,
+    scratch_dir: str | Path | None = None,
+    feedback: str = "none",
+    fixed_point_max_iter: int = 4,
+    fixed_point_tol: float = 1e-3,
+):
+    """Sequential (fixed-point) external-subsystem sizing -- W3.2.
+
+    Runs the OAS wing-mass sub-optimization *outside* the Aviary problem,
+    applies the result as a plain deck override on ``Aircraft.Wing.MASS``
+    (Aviary's ``override_aviary_vars`` renames the FLOPS output away when
+    the deck provides the value), and runs a standard sizing. Convergence
+    properties equal plain sizing's.
+
+    With the default config the sub-opt's inputs are constants, so a single
+    pass IS the fixed point -- exactly equivalent to the coupled mode
+    (whose wing mass also never moves; its extra sub-opts are re-solves at
+    unchanged inputs). ``feedback="mission_fuel"`` opts into feeding the
+    *sized* mission fuel back into the wing load-relief input and
+    iterating -- a deliberate semantic departure from upstream's
+    capacity-driven coupling, for studies that want the wing sized by
+    actual fuel load.
+
+    Returns ``(prob, meta)`` where ``meta`` records mode, per-pass history
+    (wing mass, fuel, sub-opt seconds, sizing success), and convergence of
+    the fixed point. Only ``oas_wing_mass`` specs are supported.
+    """
+    import copy as _copy
+    import time as _time
+
+    from hangar.avy.subsystems.oas_wing_mass import resolve_config, run_wing_mass_sub_opt
+
+    if feedback not in ("none", "mission_fuel"):
+        raise ValueError(f"Unknown feedback mode {feedback!r}; use 'none' or 'mission_fuel'")
+    names = [spec.get("name") for spec in subsystem_specs]
+    if names != ["oas_wing_mass"]:
+        raise ValueError(
+            "precompute mode currently supports exactly one 'oas_wing_mass' "
+            f"subsystem, got {names!r}. Use coupled mode for other combinations."
+        )
+    config = dict(subsystem_specs[0].get("config") or {})
+    resolved = resolve_config(config)
+    require_aviary()
+
+    from aviary.variable_info.variables import Aircraft, Mission
+
+    if isinstance(aircraft_data, (str, Path)):
+        from aviary.utils.process_input_decks import create_vehicle
+
+        aircraft_values, _guesses = create_vehicle(str(aircraft_data))
+    else:
+        aircraft_values = aircraft_data
+
+    fuel_lbm = resolved["fuel_lbm"]
+    if fuel_lbm is None:
+        # deck-driven semantics: load relief from the wing fuel capacity
+        fuel_lbm = float(
+            aircraft_values.get_val(Aircraft.Fuel.WING_FUEL_MASS_CAPACITY, "lbm")
+        )
+
+    passes = []
+    n_passes = fixed_point_max_iter if feedback == "mission_fuel" else 1
+    converged_fp = feedback == "none"
+    prob = None
+    with _scratch_run(scratch_dir):
+        from openmdao.core.problem import _clear_problem_names
+
+        for i in range(n_passes):
+            t0 = _time.time()
+            wing_mass_lbm = run_wing_mass_sub_opt({**config, "fuel_lbm": fuel_lbm})
+            sub_opt_s = _time.time() - t0
+
+            data = _copy.deepcopy(aircraft_values)
+            data.set_val(Aircraft.Wing.MASS, wing_mass_lbm, "lbm")
+            _clear_problem_names()
+            prob = _solve_sizing(
+                data, _copy.deepcopy(phase_info), optimizer, max_iter
+            )
+            new_fuel_lbm = float(prob.get_val(Mission.TOTAL_FUEL_MASS, units="lbm").ravel()[0])
+            passes.append(
+                {
+                    "pass": i + 1,
+                    "fuel_input_lbm": fuel_lbm,
+                    "wing_mass_lbm": wing_mass_lbm,
+                    "sized_total_fuel_lbm": new_fuel_lbm,
+                    "sub_opt_seconds": round(sub_opt_s, 1),
+                    "sizing_success": bool(prob.result.success),
+                }
+            )
+            if feedback != "mission_fuel":
+                break
+            if abs(new_fuel_lbm - fuel_lbm) <= fixed_point_tol * max(abs(fuel_lbm), 1.0):
+                converged_fp = True
+                break
+            fuel_lbm = new_fuel_lbm
+
+    meta = {
+        "mode": "precompute",
+        "feedback": feedback,
+        "passes": passes,
+        "fixed_point_converged": converged_fp,
+        "wing_mass_lbm": passes[-1]["wing_mass_lbm"],
+    }
+    return prob, meta
 
 
 def run_off_design_problem(
@@ -139,6 +254,7 @@ def run_off_design_problem(
     optimizer: str = "SLSQP",
     max_iter: int = 50,
     scratch_dir: str | Path | None = None,
+    subsystems=(),
     **off_design_kwargs,
 ):
     """Size the aircraft, then fly an off-design mission from the sized design.
@@ -152,7 +268,9 @@ def run_off_design_problem(
     problem_type = OFF_DESIGN_TYPES[mission_type]
 
     with _scratch_run(scratch_dir):
-        sizing_prob = _solve_sizing(aircraft_data, phase_info, optimizer, max_iter)
+        sizing_prob = _solve_sizing(
+            aircraft_data, phase_info, optimizer, max_iter, subsystems
+        )
         od_prob = sizing_prob.run_off_design_mission(
             problem_type=problem_type,
             optimizer=optimizer,
@@ -168,6 +286,7 @@ def run_payload_range_problem(
     optimizer: str = "SLSQP",
     max_iter: int = 50,
     scratch_dir: str | Path | None = None,
+    subsystems=(),
 ):
     """Size the aircraft, then run the payload-range off-design missions.
 
@@ -180,7 +299,9 @@ def run_payload_range_problem(
     """
     require_aviary()
     with _scratch_run(scratch_dir):
-        sizing_prob = _solve_sizing(aircraft_data, phase_info, optimizer, max_iter)
+        sizing_prob = _solve_sizing(
+            aircraft_data, phase_info, optimizer, max_iter, subsystems
+        )
         if sizing_prob.result.success:
             pr_probs = sizing_prob.run_payload_range(verbosity=0) or ()
         else:

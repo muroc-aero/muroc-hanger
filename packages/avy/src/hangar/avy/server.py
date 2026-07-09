@@ -25,9 +25,11 @@ from hangar.avy.tools import session as _prov_tools
 # ---------------------------------------------------------------------------
 
 from hangar.avy.tools.aircraft import (
+    add_external_subsystem,
     configure_mission,
     define_aircraft,
     list_aircraft_templates,
+    list_external_subsystems,
     load_aircraft_template,
 )
 from hangar.avy.tools.analysis import run_off_design, run_payload_range, run_sizing
@@ -92,6 +94,9 @@ REQUIRED WORKFLOW -- always follow this order:
      log_decision             -- record aircraft choice (decision_type="architecture_choice")
   2. define_aircraft          -- (optional) override individual deck variables
      configure_mission        -- (optional) set range / phases; defaults used if skipped
+     add_external_subsystem   -- (optional) attach 'oas_wing_mass' (OpenAeroStruct
+                                 wingbox wing mass replacing the FLOPS estimate;
+                                 adds a ~40 s nested sub-optimization per run)
   3. run_sizing               -- coupled sizing + mission optimization (~20 s - minutes)
      log_decision             -- interpret results (decision_type="result_interpretation")
      run_off_design           -- (optional) fly max_range/min_fuel missions with the
@@ -153,6 +158,8 @@ mcp.tool()(capture_tool(list_aircraft_templates))
 mcp.tool()(capture_tool(load_aircraft_template))
 mcp.tool()(capture_tool(define_aircraft))
 mcp.tool()(capture_tool(configure_mission))
+mcp.tool()(capture_tool(list_external_subsystems))
+mcp.tool()(capture_tool(add_external_subsystem))
 
 # ---------------------------------------------------------------------------
 # Register analysis tools

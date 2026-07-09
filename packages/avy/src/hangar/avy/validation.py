@@ -256,3 +256,65 @@ def validate_sizing_results(
         _check_range_target(perf.get("range_nmi"), target_range_nmi),
         _check_transport_domain(perf.get("gross_mass_lbm")),
     ]
+
+
+def external_subsystem_findings(
+    specs: list[dict], template: str | None, wing_mass_lbm: float | None
+) -> list[ValidationFinding]:
+    """Findings for runs with external subsystems attached.
+
+    The deck-scope check carries the WP4 caveat: the OAS wing mesh is
+    hard-coded to the advanced-single-aisle planform, so on any other deck
+    the wing mass is not physically meaningful (warning, not error -- the
+    numbers still solve).
+    """
+    from hangar.avy.subsystems.oas_wing_mass import SUPPORTED_DECKS
+
+    findings = []
+    names = [spec.get("name") for spec in specs]
+    if "oas_wing_mass" in names:
+        if template in SUPPORTED_DECKS:
+            findings.append(
+                ValidationFinding(
+                    check_id="subsystem.deck_scope",
+                    category="physics",
+                    severity="info",
+                    confidence="high",
+                    passed=True,
+                    message=f"oas_wing_mass supports the '{template}' deck "
+                    "(its wing mesh matches this planform).",
+                )
+            )
+        else:
+            findings.append(
+                ValidationFinding(
+                    check_id="subsystem.deck_scope",
+                    category="physics",
+                    severity="warning",
+                    confidence="high",
+                    passed=False,
+                    message=f"oas_wing_mass's wing mesh is hard-coded to the "
+                    f"advanced-single-aisle planform; deck '{template}' has "
+                    "different wing geometry, so the OAS wing mass is not "
+                    "physically meaningful for this aircraft.",
+                    remediation="Use one of the supported decks "
+                    f"({', '.join(SUPPORTED_DECKS)}) or treat the result as "
+                    "a plumbing exercise only.",
+                )
+            )
+        findings.append(
+            ValidationFinding(
+                check_id="subsystem.wing_mass_applied",
+                category="physics",
+                severity="info",
+                confidence="high",
+                passed=wing_mass_lbm is not None and wing_mass_lbm > 0,
+                message=(
+                    f"OAS wingbox wing mass applied to Aircraft.Wing.MASS: "
+                    f"{wing_mass_lbm:.1f} lbm (replaces the FLOPS estimate)."
+                    if wing_mass_lbm
+                    else "OAS wing mass output missing from the solved problem."
+                ),
+            )
+        )
+    return findings

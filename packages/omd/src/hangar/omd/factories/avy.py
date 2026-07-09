@@ -40,6 +40,7 @@ _OUTPUT_NAMES = (
     "gross_mass_lbm",
     "total_fuel_mass_lbm",
     "operating_mass_lbm",
+    "wing_mass_lbm",
     "range_nmi",
     "final_time_min",
     "converged",
@@ -73,6 +74,10 @@ class AviarySizingComp(om.ExplicitComponent):
         )
         self.options.declare("target_range_nm", default=None, allow_none=True)
         self.options.declare("overrides", types=dict, default={})
+        # [{"name": "oas_wing_mass", "config": {...}}]; names/configs are
+        # validated in the worker (hangar.avy's registry lives in .venv-avy,
+        # not here) -- only the shape is checked at build time.
+        self.options.declare("external_subsystems", types=list, default=[])
         self.options.declare("optimizer", types=str, default="SLSQP")
         self.options.declare("max_iter", types=int, default=50)
         self.options.declare("avy_python", default=None, allow_none=True)
@@ -114,6 +119,7 @@ class AviarySizingComp(om.ExplicitComponent):
             "deck": self.options["deck"],
             "phase_info_module": self.options["phase_info_module"],
             "overrides": self.options["overrides"],
+            "external_subsystems": self.options["external_subsystems"],
             "optimizer": self.options["optimizer"],
             "max_iter": self.options["max_iter"],
         }
@@ -154,7 +160,10 @@ def build_avy_sizing(
     """Build an Aviary sizing problem from plan config (``avy/Sizing``).
 
     Config keys: ``deck`` (required; aviary-relative CSV path),
-    ``phase_info_module``, ``target_range_nm``, ``overrides``, ``optimizer``,
+    ``phase_info_module``, ``target_range_nm``, ``overrides``,
+    ``external_subsystems`` ([{"name": ..., "config": {...}}] resolved by
+    hangar.avy's registry inside the worker -- e.g. ``oas_wing_mass`` adds
+    a ~40 s nested OAS wingbox sub-optimization), ``optimizer``,
     ``max_iter``, ``avy_python``, ``run_timeout_s``. The operating point may
     override ``target_range_nm``.
 
@@ -166,6 +175,13 @@ def build_avy_sizing(
             "path, e.g. 'models/aircraft/advanced_single_aisle/"
             "advanced_single_aisle_FLOPS.csv')."
         )
+    subsystem_specs = component_config.get("external_subsystems", [])
+    for entry in subsystem_specs:
+        if not isinstance(entry, dict) or "name" not in entry:
+            raise ValueError(
+                "avy/Sizing external_subsystems entries must be dicts with a "
+                f"'name' key (optional 'config'), got {entry!r}."
+            )
 
     target_range_nm = operating_points.get(
         "target_range_nm", component_config.get("target_range_nm")
@@ -178,6 +194,7 @@ def build_avy_sizing(
         ),
         target_range_nm=target_range_nm,
         overrides=component_config.get("overrides", {}),
+        external_subsystems=list(subsystem_specs),
         optimizer=component_config.get("optimizer", "SLSQP"),
         max_iter=int(component_config.get("max_iter", 50)),
         avy_python=component_config.get("avy_python"),

@@ -21,6 +21,9 @@ Spec schema::
       "target_range_nm": 1906.0,                 # optional; sets constrain_range
       "overrides": {"aircraft:wing:aspect_ratio": 13.0,
                     "aircraft:design:gross_mass": [150000, "lbm"]},  # optional
+      "external_subsystems": [                   # optional; hangar.avy registry
+          {"name": "oas_wing_mass", "config": {"cruise_mach": 0.785}}
+      ],
       "optimizer": "SLSQP",
       "max_iter": 50,
       "workdir": "/abs/path/scratch"             # cwd for the run
@@ -45,10 +48,19 @@ def run(spec: dict) -> dict:
     from aviary.interface.run_aviary import run_aviary
     from aviary.utils.process_input_decks import create_vehicle
     from aviary.variable_info.variable_meta_data import _MetaData
-    from aviary.variable_info.variables import Mission
+    from aviary.variable_info.variables import Aircraft, Mission
 
     phase_mod = importlib.import_module(spec["phase_info_module"])
     phase_info = copy.deepcopy(phase_mod.phase_info)
+
+    subsystems = []
+    subsystem_specs = spec.get("external_subsystems") or []
+    if subsystem_specs:
+        # hangar.avy IS installed in .venv-avy (unlike hangar.omd); its
+        # registry validates names/configs with typo suggestions.
+        from hangar.avy.subsystems import build_external_subsystems
+
+        subsystems = build_external_subsystems(subsystem_specs)
 
     target_range_nm = spec.get("target_range_nm")
     if target_range_nm is not None:
@@ -76,6 +88,7 @@ def run(spec: dict) -> dict:
         phase_info,
         optimizer=spec.get("optimizer", "SLSQP"),
         max_iter=int(spec.get("max_iter", 50)),
+        subsystems=subsystems,
         make_plots=False,
         verbosity=0,
     )
@@ -88,6 +101,7 @@ def run(spec: dict) -> dict:
         "gross_mass_lbm": val(Mission.GROSS_MASS, "lbm"),
         "total_fuel_mass_lbm": val(Mission.TOTAL_FUEL_MASS, "lbm"),
         "operating_mass_lbm": val(Mission.OPERATING_MASS, "lbm"),
+        "wing_mass_lbm": val(Aircraft.Wing.MASS, "lbm"),
         "range_nmi": val(Mission.RANGE, "nmi"),
         "final_time_min": val(Mission.FINAL_TIME, "min"),
     }

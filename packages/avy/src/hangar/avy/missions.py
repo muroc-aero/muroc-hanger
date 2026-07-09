@@ -56,6 +56,13 @@ MISSION_TEMPLATES: dict[str, dict] = {
         "mission (M0.85, 7750 nmi, profile pinned): SLSQP-tractable, lands "
         "within ~1.5% of the published SNOPT benchmark masses.",
     },
+    "oas_wing_example": {
+        "module": "hangar.avy.config.missions_oas_wing",
+        "description": "The mission upstream pairs with its OAS wing-mass "
+        "external subsystem (advanced single aisle): 3 fixed-profile "
+        "phases, 1800 nmi, no takeoff/landing, optimize_mass. "
+        "SLSQP-tractable (converges in ~10 s without the subsystem).",
+    },
 }
 
 # phase_info values that upstream expresses as (value, units) tuples. When an

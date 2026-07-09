@@ -304,6 +304,39 @@ gates the shape of everything after it.
 
 ### WP1 — instrument and measure (risks 1+2 gate; ~0.5 day + run time)
 
+**MEASURED (2026-07-09, .venv-avy, SLSQP, hangar builder defaults ==
+upstream example values, fixed-profile 1800 nmi mission):**
+
+| quantity | value |
+|---|---|
+| optimizer result | **converged** (`prob.result.success == True`) |
+| outer SLSQP iterations | 9 |
+| `OAStructures.compute()` calls | **1** (verified by counting the component's timing prints) |
+| nested sub-opt wall-clock | 37.0 s (the single, cold call) |
+| total `run_aviary_problem` wall-clock | 45.5 s |
+| setup wall-clock | 1.0 s |
+| wing mass (OAS) | 14539.33 lbm |
+| gross mass | 122876.48 lbm |
+| total fuel | 13812.16 lbm |
+
+Why one compute call: every OAS component input is an IndepVarComp
+constant (the fuel input included -- and upstream's deck-driven
+alternative, wing fuel *capacity*, is a deck constant too), so no outer
+design variable feeds the component. OpenMDAO evaluates it once, caches
+the output, and relevance reduction keeps the FD partial from ever being
+requested -- an FD evaluation would have printed a second compute-timing
+line, and there is none. The coupling in this upstream problem is
+**feed-forward**, not two-way.
+
+**Gate decision: coupled mode ships.** Converged, 45 s ≪ the 30-min
+ceiling. Two corollaries: (a) coupled and precompute modes are *exactly*
+equivalent here (same single sub-opt at the same inputs) -- the parity
+example asserts that equivalence instead of choosing; (b) the W3.1
+partials question is moot in this topology and stays upstream-as-is --
+it only comes alive if a future mesh-from-deck-geometry coupling puts a
+wing design variable upstream of the component (WP4 keeps geometry
+config-static, so not even then).
+
 The runtime and convergence mitigations depend on numbers we do not have.
 One instrumented coupled run of the upstream example (Lane A adaptation,
 SLSQP, fixed-profile 1800 nmi mission) in `.venv-avy`, capturing:

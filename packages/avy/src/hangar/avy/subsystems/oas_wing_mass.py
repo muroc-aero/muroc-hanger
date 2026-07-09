@@ -241,6 +241,48 @@ def _nested_driver_knobs(tol, max_iter):
         om.ScipyOptimizeDriver.run = orig
 
 
+def run_wing_mass_sub_opt(config: dict | None = None) -> float:
+    """Run one standalone nested sub-optimization; return wing mass in lbm.
+
+    The precompute-mode workhorse: the same builder/group as the coupled
+    path, executed once in a throwaway problem instead of inside Aviary's
+    pre-mission. ``fuel_lbm`` must be resolvable to a number (the caller
+    supplies the deck capacity when config leaves it deck-driven).
+    Caller must hold the runner's scratch context -- OAS writes report
+    files cwd-relative like Aviary does.
+    """
+    resolved = resolve_config(config)
+    if resolved["fuel_lbm"] is None:
+        raise ValueError(
+            "run_wing_mass_sub_opt needs a concrete fuel_lbm; resolve the "
+            "deck's wing fuel capacity before calling (the runner does this)."
+        )
+    builder = build_oas_wing_mass(config)
+
+    import aviary.api as av
+    import openmdao.api as om
+
+    prob = om.Problem()
+    prob.model.add_subsystem(
+        "wing_mass", builder.build_pre_mission(av.AviaryValues()), promotes=["*"]
+    )
+    with _suppress_stdout():
+        prob.setup()
+        prob.run_model()
+    return float(prob.get_val(av.Aircraft.Wing.MASS, units="lbm").item())
+
+
+@contextlib.contextmanager
+def _suppress_stdout():
+    """Silence the component's per-compute timing prints (QUIET contract)."""
+    import io
+
+    import contextlib as _ctx
+
+    with _ctx.redirect_stdout(io.StringIO()):
+        yield
+
+
 def build_oas_wing_mass(config: dict | None = None, name: str = "oas_wing_mass"):
     """Build the OAS wing-mass SubsystemBuilder from a config dict."""
     require_oas_subsystem()

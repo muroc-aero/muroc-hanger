@@ -13,6 +13,11 @@ from hangar.avy.missions import (
     build_phase_info,
     summarize_phase_info,
 )
+from hangar.avy.subsystems import (
+    EXTERNAL_SUBSYSTEMS,
+    list_external_subsystems_info,
+    validate_subsystem_spec,
+)
 from hangar.avy.validators import validate_aircraft_exists, validate_deck_overrides
 
 
@@ -186,4 +191,73 @@ async def configure_mission(
         "target_range_nm": target_range_nm,
         "phases": summarize_phase_info(phase_info),
         "status": f"Mission configured for '{aircraft_name}'. Call run_sizing.",
+    }
+
+
+async def list_external_subsystems() -> dict:
+    """List the available external subsystems.
+
+    External subsystems are OpenMDAO systems that join the Aviary sizing
+    problem and override one of its computed variables -- e.g.
+    'oas_wing_mass' replaces the empirical FLOPS wing weight with a
+    physics-based OpenAeroStruct wingbox sub-optimization. Attach one to
+    an aircraft with add_external_subsystem.
+    """
+    info = list_external_subsystems_info()
+    return {"count": len(info), "subsystems": info}
+
+
+async def add_external_subsystem(
+    aircraft_name: Annotated[str, "Name of aircraft loaded by load_aircraft_template"] = "aircraft",
+    subsystem: Annotated[
+        str,
+        "External subsystem name. Valid: " + ", ".join(sorted(EXTERNAL_SUBSYSTEMS)) + ". "
+        "Call list_external_subsystems for descriptions and config keys.",
+    ] = "oas_wing_mass",
+    config: Annotated[
+        dict[str, Any] | None,
+        "Subsystem config overrides (validated against the subsystem's "
+        "config keys with typo suggestions). Defaults are the upstream "
+        "example values for the advanced single aisle. Example: "
+        "{'cruise_mach': 0.78, 'num_box_cp': 15, 'sub_opt_max_iter': 40}",
+    ] = None,
+    session_id: Annotated[str, "Session ID"] = "default",
+) -> dict:
+    """Attach an external subsystem to a loaded aircraft.
+
+    The subsystem joins every subsequent analysis run for this aircraft
+    (run_sizing / run_off_design / run_payload_range). Adding the same
+    subsystem again replaces its config. NOTE: 'oas_wing_mass' adds a
+    nested wingbox sub-optimization (~40 s) to the run.
+
+    run_sizing's subsystem_mode chooses how it couples: 'coupled' (inside
+    the Aviary problem, upstream semantics) or 'precompute' (sub-opt runs
+    once up front, result applied as a deck override -- equivalent for
+    this feed-forward subsystem and cheaper when iterating on missions).
+    """
+    session = _sessions.get(session_id)
+    aircraft_cfg = validate_aircraft_exists(session, aircraft_name)
+
+    resolved = validate_subsystem_spec(subsystem, config)
+    supported = EXTERNAL_SUBSYSTEMS[subsystem]["supported_decks"]
+    scope_note = ""
+    if aircraft_cfg["template"] not in supported:
+        scope_note = (
+            f" WARNING: {subsystem}'s wing mesh is hard-coded to the "
+            f"advanced-single-aisle planform; results on "
+            f"'{aircraft_cfg['template']}' are not physically meaningful."
+        )
+
+    specs = aircraft_cfg.setdefault("external_subsystems", [])
+    specs[:] = [s for s in specs if s["name"] != subsystem]
+    specs.append({"name": subsystem, "config": dict(config or {})})
+
+    return {
+        "aircraft_name": aircraft_name,
+        "subsystem": subsystem,
+        "config": dict(config or {}),
+        "resolved_keys": sorted(k for k in resolved if config and k in config),
+        "external_subsystems": [s["name"] for s in specs],
+        "status": f"Subsystem '{subsystem}' attached to '{aircraft_name}'; "
+        "it joins every subsequent analysis run." + scope_note,
     }

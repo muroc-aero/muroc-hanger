@@ -555,3 +555,34 @@ class TestAvyBwbParity:
             assert result["summary"][k] == pytest.approx(lane_a[k], **TOL_PARITY)
         for k, gold in GOLDEN.items():
             assert lane_a[k] == pytest.approx(gold, **TOL_GOLDEN)
+
+
+@requires_avy_venv
+class TestAvyOasWingParity:
+    """OAS-in-Aviary wing mass through the avy/Sizing external_subsystems
+    pass-through -- the sub-opt runs inside the worker in .venv-avy."""
+
+    @pytest.mark.slow
+    def test_coupled_sizing_parity(self, tmp_path):
+        sys.path.insert(0, str(EXAMPLES_DIR / "avy_oas_wing"))
+        from avy_oas_wing.lane_a.coupled_sizing import run as lane_a_run
+        from avy_oas_wing.shared import GOLDEN, METRICS, TOL_GOLDEN, TOL_PARITY
+
+        lane_a = lane_a_run()
+
+        plan_path = (
+            EXAMPLES_DIR / "avy_oas_wing" / "lane_b" / "coupled_sizing" / "plan.yaml"
+        )
+        result = run_plan(plan_path, mode="analysis", recording_level="minimal",
+                          db_path=tmp_path / "analysis.db")
+
+        _print_comparison("Aviary + OAS wingbox wing mass (fixed profile, 1800 nmi)",
+                          lane_a, result["summary"], keys=METRICS,
+                          case="avy_oas_wing")
+
+        assert result["status"] in ("completed", "converged")
+        assert result["summary"]["converged"] == 1.0
+        for k in METRICS:
+            assert result["summary"][k] == pytest.approx(lane_a[k], **TOL_PARITY)
+        for k, gold in GOLDEN.items():
+            assert lane_a[k] == pytest.approx(gold, **TOL_GOLDEN)

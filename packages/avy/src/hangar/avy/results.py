@@ -46,6 +46,7 @@ def extract_sizing_results(prob, phase_names: list[str]) -> dict:
 
     design = {
         "design_gross_mass_lbm": _get_scalar(prob, Aircraft.Design.GROSS_MASS, "lbm"),
+        "wing_mass_lbm": _get_scalar(prob, Aircraft.Wing.MASS, "lbm"),
         "wing_area_ft2": _get_scalar(prob, Aircraft.Wing.AREA, "ft**2"),
         "wing_span_ft": _get_scalar(prob, Aircraft.Wing.SPAN, "ft"),
     }

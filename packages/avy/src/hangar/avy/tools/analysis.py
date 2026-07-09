@@ -34,10 +34,13 @@ from hangar.avy.runner import (
     require_aviary,
     run_off_design_problem,
     run_payload_range_problem,
+    run_precompute_sizing_problem,
     run_sizing_problem,
 )
+from hangar.avy.subsystems import build_external_subsystems
 from hangar.avy.validation import (
     design_point_finding,
+    external_subsystem_findings,
     payload_range_findings,
     validate_sizing_results,
 )
@@ -115,6 +118,14 @@ async def run_sizing(
         "(require pyoptsparse; rejected with instructions when absent).",
     ] = DEFAULT_OPTIMIZER,
     max_iter: Annotated[int, "Maximum optimizer iterations"] = DEFAULT_MAX_ITER,
+    subsystem_mode: Annotated[
+        str,
+        "How attached external subsystems couple: 'coupled' (inside the "
+        "Aviary problem, upstream semantics) or 'precompute' (sub-opt runs "
+        "once up front, result applied as a deck override -- equivalent "
+        "for the feed-forward oas_wing_mass and cheaper across repeat "
+        "runs). Ignored when no subsystem is attached.",
+    ] = "coupled",
     run_name: Annotated[str | None, "Optional label for this run"] = None,
     session_id: Annotated[str, "Session ID"] = "default",
 ) -> dict:
@@ -123,7 +134,8 @@ async def run_sizing(
     Sizes the aircraft (gross mass, fuel) while optimizing the mission
     trajectory against the configured phase_info (default: the 3-phase
     energy_state climb/cruise/descent mission). Takes tens of seconds to
-    minutes depending on mission complexity.
+    minutes depending on mission complexity; an attached oas_wing_mass
+    subsystem adds a ~40 s nested wingbox sub-optimization.
 
     ALWAYS check validation.passed (the 'optimizer.success' finding) before
     trusting results: optimizer non-convergence does not raise, it returns
@@ -135,22 +147,44 @@ async def run_sizing(
     t0 = time.perf_counter()
     session = _sessions.get(session_id)
 
+    if subsystem_mode not in ("coupled", "precompute"):
+        raise ValueError(
+            f"Unknown subsystem_mode {subsystem_mode!r}; use 'coupled' or 'precompute'."
+        )
+
     aircraft_cfg, phase_info, phase_names, target_range_nm, phases_summary = _prepare_run(
         session, aircraft_name, optimizer, max_iter
     )
+    subsystem_specs = list(aircraft_cfg.get("external_subsystems") or [])
     run_id = _make_run_id()
     scratch_dir = _run_scratch_dir(session, session_id, run_id)
 
     def _run():
         aircraft_data = load_deck(aircraft_cfg["deck"], aircraft_cfg["overrides"])
-        prob = run_sizing_problem(
-            aircraft_data,
-            phase_info,
-            optimizer=optimizer,
-            max_iter=max_iter,
-            scratch_dir=scratch_dir,
-        )
-        return extract_sizing_results(prob, phase_names)
+        if subsystem_specs and subsystem_mode == "precompute":
+            prob, meta = run_precompute_sizing_problem(
+                aircraft_data,
+                phase_info,
+                subsystem_specs,
+                optimizer=optimizer,
+                max_iter=max_iter,
+                scratch_dir=scratch_dir,
+            )
+        else:
+            builders = build_external_subsystems(subsystem_specs)
+            prob = run_sizing_problem(
+                aircraft_data,
+                phase_info,
+                optimizer=optimizer,
+                max_iter=max_iter,
+                scratch_dir=scratch_dir,
+                subsystems=builders,
+            )
+            meta = {"mode": "coupled"} if subsystem_specs else None
+        results = extract_sizing_results(prob, phase_names)
+        if meta is not None:
+            results["subsystems"] = meta
+        return results
 
     results = await asyncio.to_thread(_suppress_output, _run)
     _cleanup_scratch(scratch_dir, results)
@@ -160,12 +194,21 @@ async def run_sizing(
     findings = validate_sizing_results(
         results, optimizer, max_iter, target_range_nmi=target_range_nm
     )
+    findings.extend(
+        external_subsystem_findings(
+            subsystem_specs,
+            aircraft_cfg["template"],
+            results.get("design", {}).get("wing_mass_lbm"),
+        )
+    )
 
     inputs = {
         "aircraft_name": aircraft_name,
         "template": aircraft_cfg["template"],
         "deck": aircraft_cfg["deck"],
         "overrides": aircraft_cfg["overrides"],
+        "external_subsystems": subsystem_specs,
+        "subsystem_mode": subsystem_mode if subsystem_specs else None,
         "optimizer": optimizer,
         "max_iter": max_iter,
         "target_range_nm": target_range_nm,
@@ -245,6 +288,7 @@ async def run_off_design(
     aircraft_cfg, phase_info, phase_names, _, _phases = _prepare_run(
         session, aircraft_name, optimizer, max_iter
     )
+    subsystem_specs = list(aircraft_cfg.get("external_subsystems") or [])
     run_id = _make_run_id()
     scratch_dir = _run_scratch_dir(session, session_id, run_id)
 
@@ -267,6 +311,7 @@ async def run_off_design(
             optimizer=optimizer,
             max_iter=max_iter,
             scratch_dir=scratch_dir,
+            subsystems=build_external_subsystems(subsystem_specs),
             **od_kwargs,
         )
         results = extract_sizing_results(od_prob, phase_names)
@@ -287,12 +332,20 @@ async def run_off_design(
     findings.append(
         design_point_finding(results["design_point"].get("optimizer_success"))
     )
+    findings.extend(
+        external_subsystem_findings(
+            subsystem_specs,
+            aircraft_cfg["template"],
+            results.get("design", {}).get("wing_mass_lbm"),
+        )
+    )
 
     inputs = {
         "aircraft_name": aircraft_name,
         "template": aircraft_cfg["template"],
         "deck": aircraft_cfg["deck"],
         "overrides": aircraft_cfg["overrides"],
+        "external_subsystems": subsystem_specs,
         "mission_type": mission_type,
         "mission_range_nm": mission_range_nm,
         "mission_gross_mass_lbm": mission_gross_mass_lbm,
@@ -349,6 +402,7 @@ async def run_payload_range(
     aircraft_cfg, phase_info, phase_names, target_range_nm, _phases = _prepare_run(
         session, aircraft_name, optimizer, max_iter
     )
+    subsystem_specs = list(aircraft_cfg.get("external_subsystems") or [])
     run_id = _make_run_id()
     scratch_dir = _run_scratch_dir(session, session_id, run_id)
 
@@ -360,6 +414,7 @@ async def run_payload_range(
             optimizer=optimizer,
             max_iter=max_iter,
             scratch_dir=scratch_dir,
+            subsystems=build_external_subsystems(subsystem_specs),
         )
         results = extract_sizing_results(sizing_prob, phase_names)
         results["payload_range"] = {
@@ -379,12 +434,20 @@ async def run_payload_range(
     findings.append(
         payload_range_findings(results["payload_range"])
     )
+    findings.extend(
+        external_subsystem_findings(
+            subsystem_specs,
+            aircraft_cfg["template"],
+            results.get("design", {}).get("wing_mass_lbm"),
+        )
+    )
 
     inputs = {
         "aircraft_name": aircraft_name,
         "template": aircraft_cfg["template"],
         "deck": aircraft_cfg["deck"],
         "overrides": aircraft_cfg["overrides"],
+        "external_subsystems": subsystem_specs,
         "optimizer": optimizer,
         "max_iter": max_iter,
         "target_range_nm": target_range_nm,

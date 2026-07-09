@@ -65,3 +65,19 @@ def test_missing_venv_gives_setup_instructions(tmp_path):
     prob.setup()
     with pytest.raises(Exception, match="setup-avy-venv"):
         prob.run_model()
+
+
+def test_external_subsystems_pass_through():
+    build = get_factory("avy/Sizing")
+    specs = [{"name": "oas_wing_mass", "config": {"cruise_mach": 0.785}}]
+    prob, meta = build({"deck": DECK, "external_subsystems": specs}, {})
+    prob.setup()
+    comp = prob.model.aviary
+    assert comp.options["external_subsystems"] == specs
+    assert "wing_mass_lbm" in meta["output_names"]
+
+
+def test_external_subsystems_shape_validated():
+    build = get_factory("avy/Sizing")
+    with pytest.raises(ValueError, match="name"):
+        build({"deck": DECK, "external_subsystems": ["oas_wing_mass"]}, {})
