@@ -80,11 +80,25 @@ numpy-2-clean even though the *main* venv holds it at numpy<2 for
 openconcept's sake. OAS simply gets installed a second time, into
 `.venv-avy`.
 
-Runtime envelope (drives everything below): one nested sub-opt ≈ 45 s, and
-the pre-mission component re-runs every outer optimizer iteration →
-a full coupled sizing is plausibly **15–45 min with SLSQP**. Upstream's own
-example says "use the most performant optimizer installed" (prefers
-SNOPT/IPOPT). Treat wall-clock as the top risk, not convergence.
+Runtime envelope (drives everything below): one *cold* nested sub-opt
+≈ 45 s. Two facts found in the component soften and sharpen this:
+
+- Upstream already **warm-starts** the nested optimization
+  (`self.previous_DV_values` seeds each `compute()` with the previous
+  optimum), so per-iteration cost after the first solve should be far
+  below 45 s — the real coupled wall-clock needs measurement (WP1), not
+  extrapolation.
+- The component declares its outer partials as
+  `declare_partials('*', wrt='fuel', method='fd')` — every outer gradient
+  evaluation finite-differences **across the nested sub-optimization**
+  (one extra warm-started sub-opt per gradient), and the derivative is
+  only as clean as the sub-opt's convergence (`tol=1e-8`, hardcoded, no
+  `maxiter`). This single line is the mechanism behind both the runtime
+  and the SLSQP-robustness risks.
+
+Upstream's own example says "use the most performant optimizer installed"
+(prefers SNOPT/IPOPT). Treat wall-clock and gradient quality as the top
+risks, not sub-opt feasibility.
 
 ## Architecture A — native avy: OAS as an Aviary external subsystem
 
@@ -241,30 +255,168 @@ sequential composition already models:
   same wingbox mass — document the expected gap: tight coupling re-optimizes
   the wing per outer iteration, loose coupling freezes it).
 
-## Sequencing and estimates
+## Sequencing and risks
+
+Superseded by the risk-mitigation work plan below — see **Revised
+sequencing** at the end of this doc for the authoritative step order.
+
+Risks, ranked (each mapped to a work package below):
+
+1. **Wall-clock**: nested sub-opt cost × outer iterations × FD gradient
+   evaluations → WP1 (measure), WP2 (reduce).
+2. **SLSQP convergence of the coupled problem**: FD-across-sub-opt
+   gradient noise; upstream example prefers SNOPT/IPOPT → WP1 (gate),
+   WP3 (robustness modes).
+3. **Hard-coded mesh**: the subsystem is single-aisle-specific until
+   `user_mesh()` reads deck variables → WP4 (parametric mesh).
+4. **Upstream API drift**: `aviary.models.external_subsystems...` is an
+   example namespace, not core API → WP5 (contract tests + pin-bump
+   checklist).
+
+## Risk mitigation work plan
+
+Work packages, in execution order. WP5 is trivial and lands first; WP1
+gates the shape of everything after it.
+
+### WP5 — drift protection (risk 4; ~0.25 day, do first)
+
+- **W5.1 Contract test**: `packages/avy/tests/test_avy_oas_subsystem.py`
+  (fast, `importorskip("aviary")` + `importorskip("openaerostruct")` so it
+  skips in the main venv, runs for real via `.venv-avy`):
+  - the upstream import path
+    `aviary.models.external_subsystems.open_aero_struct` resolves;
+  - `OASWingMassBuilder` is an `av.SubsystemBuilder` and
+    `build_pre_mission` returns a group promoting onto
+    `Aircraft.Wing.MASS`;
+  - `OAStructures` still exposes the input/output names our config schema
+    maps to (twist_cp, spar/skin thickness, fuel, wing_mass, ...);
+  - `run_aviary` still accepts the `subsystems` kwarg
+    (`inspect.signature`).
+- **W5.2 Pin-bump checklist**: comment next to `AVY_REF`/`OAS_REF` in
+  `scripts/upstream-pins.env`: "after bumping, run the avy contract tests
+  in .venv-avy — the OAS external-subsystem integration imports from
+  Aviary's example namespace, which is not API-stable."
+- **W5.3 CI leg (decide separately, ~0.5 day if taken)**: a GH Actions job
+  that builds `.venv-avy` (uv-cached) and runs
+  `packages/avy/tests -m "not slow"` inside it. Today drift is caught only
+  locally; this is the only mitigation that makes it automatic. Not
+  required for the examples to ship.
+
+### WP1 — instrument and measure (risks 1+2 gate; ~0.5 day + run time)
+
+The runtime and convergence mitigations depend on numbers we do not have.
+One instrumented coupled run of the upstream example (Lane A adaptation,
+SLSQP, fixed-profile 1800 nmi mission) in `.venv-avy`, capturing:
+
+- number of `OAStructures.compute()` calls, split cold vs warm-started,
+  and per-call wall-clock (the component already prints per-compute
+  timing; capture stdout rather than patch);
+- outer SLSQP iteration count and convergence status;
+- total wall-clock;
+- warm vs cold sub-opt cost ratio (validates that upstream's
+  `previous_DV_values` warm start does the heavy lifting).
+
+Deliverables: a measured budget table appended to this doc, and the
+**go/no-go for coupled SLSQP goldens** (Architecture A4 step 3's gate).
+Decision rule: converged + total wall-clock under ~30 min → coupled mode
+is the shipped example; otherwise precompute mode (W3.2) is the shipped
+example and coupled mode is documented as IPOPT-territory.
+
+### WP2 — runtime reduction (risk 1; ~0.5 day)
+
+- **W2.1 Nested-driver knobs**: builder config `sub_opt_tol` (default
+  upstream's 1e-8) and `sub_opt_max_iter` (default 100). The nested
+  driver settings are hardcoded mid-`compute()`, so this requires a thin
+  subclass of `OAStructures` whose `initialize()` adds the two options
+  and whose compute path applies them — implemented as a *surgical*
+  subclass (override only the driver-setup seam if upstream's structure
+  allows; otherwise carry a clearly-marked copied block with a pin-bump
+  note in W5.2). Do NOT fork the physics.
+- **W2.2 Smoke config**: a documented cheap variant for plumbing tests —
+  `num_box_cp` reduced (51 → ~15), `sub_opt_tol` loosened to 1e-6,
+  `sub_opt_max_iter` ~40. The VLM mesh is already minimal (nx=2, ny=7),
+  so section resolution and tolerance are the only real levers; say so
+  honestly rather than promising mesh-coarsening speedups.
+- **W2.3 Optional fuel-tolerance memoization**: cache
+  `(fuel → wing_mass)` and skip the sub-opt when the fuel input moved
+  less than `recompute_rel_tol`. **Off by default** — it silently zeroes
+  the FD partial when the tolerance swallows the FD step, which changes
+  outer convergence behavior (see W3.1). Ship only with a validation
+  finding that reports cache hits, so a run's provenance shows when
+  memoization was active.
+
+### WP3 — convergence robustness (risk 2; ~1 day)
+
+- **W3.1 Partials strategy decision** (measure, then choose):
+  the FD-across-sub-opt derivative couples gradient quality to
+  `sub_opt_tol`. Evaluate on the WP1 instrumented run:
+  (a) upstream as-is (FD, tol 1e-8);
+  (b) frozen partials — treat wing mass as constant per outer iteration
+  (zero partial), which converts the coupling into a fixed-point
+  iteration handled by W3.2;
+  (c) FD with tightened sub-opt tol only during gradient evaluations.
+  Deliverable: a decision recorded in this doc with the measured
+  iteration counts. (b) is the likely winner for SLSQP because it removes
+  gradient noise entirely.
+- **W3.2 `mode: "precompute"` (sequential fixed-point)** — the
+  guaranteed-shippable path: run the OAS sub-opt *once* before the Aviary
+  problem (fuel guess from the deck), apply the wing mass as a plain deck
+  override, run standard sizing, then optionally iterate
+  (sub-opt → override → sizing) until `wing_mass` and `fuel` settle
+  (`fixed_point_max_iter` default 4, `fixed_point_tol` rel 1e-3 —
+  weight-loop fixed points of this kind typically settle in 2–4 passes).
+  Convergence properties equal plain sizing's, runtime is
+  `N_fp × (sub_opt + sizing)`, and every iterate is observable
+  (per-pass ValidationFinding with the wing-mass trajectory). This mode
+  reuses the A2 builder config unchanged; only the runner orchestration
+  differs. If WP1's gate fails for coupled SLSQP, this is the shipped
+  example and the parity goldens anchor on it.
+- **W3.3 IPOPT documentation (stretch, docs-only)**: conda-forge
+  `pyoptsparse`+IPOPT into `.venv-avy` is possible but not
+  pip-reproducible; document the recipe in `packages/avy/DEPLOY.md` as
+  the coupled-mode escape hatch. No CI, no pins.
+
+### WP4 — parametric mesh (risk 3; ~1 day)
+
+- **W4.1 Deck-driven `user_mesh`**: upstream's `user_mesh()` is already a
+  parameterized 2-segment (kink) planform builder with the
+  advanced-single-aisle constants baked in (half_span 17.96 m, kink at
+  4.95 m, chords 5.57/4.13/1.51 m, LE sweeps 25°/25°). Lift the constants
+  into builder config, defaulted from deck variables:
+  `Aircraft.Wing.SPAN`, `AREA`, `TAPER_RATIO`, `SWEEP`,
+  `Aircraft.Wing.` kink/break span-fraction (FLOPS decks carry it as the
+  wing definition's break location; fall back to a config value when the
+  deck lacks it). Explicit config always wins over deck-derived values.
+- **W4.2 Regression + sanity acceptance**:
+  - advanced-single-aisle deck → generated mesh equals the hardcoded
+    upstream mesh to 1e-10 (proves the lift-and-parameterize refactor
+    changed nothing);
+  - one other transport deck (`large_single_aisle_1`) → mesh is finite,
+    spanwise-monotonic, positive chords, and the coupled/precompute run
+    produces a plausible wing mass (order-of-magnitude finding, not a
+    golden).
+  - Until W4.1 lands, the deck-scope *warning* finding from A2 ships; after
+    it lands, the finding drops to info and reports which mesh source
+    (deck-derived vs config vs upstream-hardcoded) was used.
+- **W4.3 Upstream contribution (stretch)**: PR the parametric
+  `user_mesh` + the W2.1 driver-config options to Aviary; if accepted,
+  the W2.1 subclass shrinks to a pass-through on the next AVY_REF bump.
+
+### Revised sequencing
 
 | Step | Contents | Size |
 |---|---|---|
-| 1 | A1 venv/pins + A2 builder & registry + unit tests | ~1 day |
-| 2 | A3 runner/tools/CLI/results/validation | ~1 day |
-| 3 | A4 native parity lanes + goldens (gated on SLSQP run) | ~0.5–1 day, dominated by run time |
-| 4 | B1 worker/factory pass-through + omd example | ~0.5 day |
-| 5 | B2 override inputs + convert component + coupled plan/study | ~1–1.5 days |
-| 6 | Docs: aviary-server-plan.md addendum, CLAUDE.md, skills sync | ~0.5 day |
+| 1 | WP5.1–5.2 drift contract tests + pin checklist | ~0.25 day |
+| 2 | A1 venv/pins + A2 builder & registry + unit tests | ~1 day |
+| 3 | WP1 instrumented coupled run → budget table + mode gate | ~0.5 day + run time |
+| 4 | W3.2 precompute mode + W2.1/W2.2 knobs (informed by WP1) | ~1 day |
+| 5 | A3 runner/tools/CLI + A4 parity lanes, goldens in the gated mode | ~1.5 days |
+| 6 | B1 omd pass-through + example | ~0.5 day |
+| 7 | W3.1 partials decision + coupled-mode goldens if gate passed | ~0.5 day |
+| 8 | WP4 parametric mesh + second-deck example | ~1 day |
+| 9 | B2 override inputs + convert component + coupled plan/study | ~1–1.5 days |
+| 10 | W5.3 CI leg (optional) + WP4.3 upstream PR (stretch) + docs sync | ~1 day |
 
-Risks, ranked:
-
-1. **Wall-clock**: nested sub-opt (~45 s) × outer iterations. Mitigations:
-   fixed-profile mission (already), `sub_opt_max_iter` config, coarse
-   `num_box_cp` option, everything marked `slow`, goldens run locally.
-2. **SLSQP convergence of the coupled problem**: upstream example prefers
-   SNOPT/IPOPT. Gate goldens on an actual converged SLSQP run (step 3
-   before step 4/5 goldens); IPOPT-only fallback is a documented negative
-   result, and the example still ships Lane B/C contract tests.
-3. **Hard-coded mesh**: the subsystem is single-aisle-specific until
-   upstream generalizes `user_mesh()`. Scope all examples to that deck;
-   warn on others. Generalizing the mesh from `Aircraft.Wing.*` is
-   explicitly out of scope (it's an upstream contribution, not a wrapper).
-4. **Upstream API drift**: `aviary.models.external_subsystems...` is an
-   example namespace, not core API — pin-protected (AVY_REF), but note it
-   in the reference so a pin bump re-checks the import path.
+Anything that can invalidate goldens (WP1 mode gate, W3.1 partials choice)
+lands *before* the goldens are written; anything additive (mesh, CI leg,
+upstream PR) lands after.
