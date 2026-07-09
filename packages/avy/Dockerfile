@@ -18,6 +18,14 @@ WORKDIR /app
 ARG AVY_REF=2af552a9b2aae5965c12ae8afde091cce7587c32
 RUN pip install --no-cache-dir "aviary @ git+https://github.com/OpenMDAO/Aviary.git@${AVY_REF}"
 
+# OpenAeroStruct + ambiance for the OAS-in-Aviary external subsystem
+# (aviary's own numpy-2 stack satisfies OAS -- no cap conflict here).
+# Default tracks OAS_REF in scripts/upstream-pins.env; bump both together.
+ARG OAS_REF=0a4d614f9494cbadaba4a6fa32a33d6e54e14f34
+RUN pip install --no-cache-dir \
+        "openaerostruct @ git+https://github.com/mdolab/OpenAeroStruct.git@${OAS_REF}" \
+        ambiance
+
 # Copy SDK first (changes less often -> better layer caching)
 COPY packages/sdk/ packages/sdk/
 RUN pip install --no-cache-dir "packages/sdk[all]"
