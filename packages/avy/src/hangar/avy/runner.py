@@ -210,7 +210,9 @@ def run_precompute_sizing_problem(
 
         for i in range(n_passes):
             t0 = _time.time()
-            wing_mass_lbm = run_wing_mass_sub_opt({**config, "fuel_lbm": fuel_lbm})
+            wing_mass_lbm = run_wing_mass_sub_opt(
+                {**config, "fuel_lbm": fuel_lbm}, aviary_values=aircraft_values
+            )
             sub_opt_s = _time.time() - t0
 
             data = _copy.deepcopy(aircraft_values)

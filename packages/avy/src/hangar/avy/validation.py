@@ -263,17 +263,38 @@ def external_subsystem_findings(
 ) -> list[ValidationFinding]:
     """Findings for runs with external subsystems attached.
 
-    The deck-scope check carries the WP4 caveat: the OAS wing mesh is
-    hard-coded to the advanced-single-aisle planform, so on any other deck
-    the wing mass is not physically meaningful (warning, not error -- the
-    numbers still solve).
+    The deck-scope check carries the WP4 caveat: the *default* OAS wing
+    mesh is hard-coded to the advanced-single-aisle planform, so on any
+    other deck the wing mass is not physically meaningful (warning, not
+    error -- the numbers still solve) unless the config picks a
+    deck-derived or explicit planform.
     """
-    from hangar.avy.subsystems.oas_wing_mass import SUPPORTED_DECKS
+    from hangar.avy.subsystems.oas_wing_mass import SUPPORTED_DECKS, mesh_source
 
     findings = []
-    names = [spec.get("name") for spec in specs]
-    if "oas_wing_mass" in names:
-        if template in SUPPORTED_DECKS:
+    oas_specs = [s for s in specs if s.get("name") == "oas_wing_mass"]
+    if oas_specs:
+        source = mesh_source(oas_specs[0].get("config"))
+        if source != "upstream-hardcoded":
+            findings.append(
+                ValidationFinding(
+                    check_id="subsystem.deck_scope",
+                    category="physics",
+                    severity="info",
+                    confidence="high",
+                    passed=True,
+                    message=f"oas_wing_mass wing mesh source: {source}. "
+                    + (
+                        "Simple-trapezoid planform derived from the deck's "
+                        "span/area/taper/sweep (deck sweep applied as LE "
+                        "sweep) -- planform-consistent with this aircraft, "
+                        "cruder than a multi-segment FLOPS definition."
+                        if source == "deck-derived"
+                        else "Explicit planform from the subsystem config."
+                    ),
+                )
+            )
+        elif template in SUPPORTED_DECKS:
             findings.append(
                 ValidationFinding(
                     check_id="subsystem.deck_scope",
@@ -293,13 +314,15 @@ def external_subsystem_findings(
                     severity="warning",
                     confidence="high",
                     passed=False,
-                    message=f"oas_wing_mass's wing mesh is hard-coded to the "
-                    f"advanced-single-aisle planform; deck '{template}' has "
-                    "different wing geometry, so the OAS wing mass is not "
-                    "physically meaningful for this aircraft.",
-                    remediation="Use one of the supported decks "
-                    f"({', '.join(SUPPORTED_DECKS)}) or treat the result as "
-                    "a plumbing exercise only.",
+                    message=f"oas_wing_mass's default wing mesh is hard-coded "
+                    f"to the advanced-single-aisle planform; deck "
+                    f"'{template}' has different wing geometry, so the OAS "
+                    "wing mass is not physically meaningful for this aircraft.",
+                    remediation="Set the subsystem's planform config to "
+                    "'deck' (derives the planform from this deck's "
+                    "span/area/taper/sweep), use one of the supported decks "
+                    f"({', '.join(SUPPORTED_DECKS)}), or treat the result "
+                    "as a plumbing exercise only.",
                 )
             )
         findings.append(

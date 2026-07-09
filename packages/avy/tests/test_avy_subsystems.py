@@ -168,3 +168,119 @@ class TestBuilderInAviaryVenv:
         prob = self._setup_group({"num_box_cp": 15, "num_twist_cp": 3})
         val = prob.get_val("wing_mass.aerostructures.box_upper_x")
         assert val.shape == (15,)
+
+
+class TestWingMesh:
+    """WP4: parametric mesh + deck-derived planform."""
+
+    def test_trapezoid_planform_recovers_area(self):
+        from hangar.avy.subsystems.wing_mesh import trapezoid_planform
+
+        pf = trapezoid_planform(span_m=34.2, area_m2=124.7, taper_ratio=0.28, sweep_deg=25.0)
+        area = 2 * pf["half_span_m"] * (pf["root_chord_m"] + pf["tip_chord_m"]) / 2
+        assert area == pytest.approx(124.7)
+        # degenerate kink: chord on the straight taper line
+        eta = pf["kink_location_m"] / pf["half_span_m"]
+        on_line = pf["root_chord_m"] + (pf["tip_chord_m"] - pf["root_chord_m"]) * eta
+        assert pf["kink_chord_m"] == pytest.approx(on_line)
+
+    def test_trapezoid_planform_rejects_garbage(self):
+        from hangar.avy.subsystems.wing_mesh import trapezoid_planform
+
+        with pytest.raises(ValueError, match="Implausible"):
+            trapezoid_planform(span_m=-1, area_m2=100, taper_ratio=0.3, sweep_deg=25)
+        with pytest.raises(ValueError, match="kink_eta"):
+            trapezoid_planform(34, 120, 0.3, 25, kink_eta=1.5)
+
+    def test_parametric_mesh_shape_and_sanity(self):
+        from hangar.avy.subsystems.wing_mesh import (
+            UPSTREAM_PLANFORM,
+            mesh_sanity_issues,
+            parametric_mesh,
+        )
+
+        mesh = parametric_mesh(**UPSTREAM_PLANFORM)
+        assert mesh.shape == (2, 7, 3)
+        assert mesh_sanity_issues(mesh) == []
+
+    def test_mesh_sanity_catches_bad_mesh(self):
+        from hangar.avy.subsystems.wing_mesh import mesh_sanity_issues
+
+        bad = np.zeros((2, 7, 3))  # zero chords, non-monotonic span
+        assert mesh_sanity_issues(bad)
+
+    def test_mesh_source_mapping(self):
+        from hangar.avy.subsystems.oas_wing_mass import mesh_source
+
+        assert mesh_source(None) == "upstream-hardcoded"
+        assert mesh_source({"planform": "deck"}) == "deck-derived"
+        assert mesh_source({"planform": {"half_span_m": 18.0}}) == "config"
+
+    def test_planform_config_validation(self):
+        with pytest.raises(ValueError, match="planform keys"):
+            resolve_config({"planform": {"half_spam_m": 18.0}})
+        with pytest.raises(ValueError, match="planform must be"):
+            resolve_config({"planform": "dek"})
+        resolved = resolve_config({"planform": "deck", "kink_eta": 0.35})
+        assert resolved["planform"] == "deck"
+
+    def test_parametric_mesh_matches_upstream_bit_exact(self):
+        """The lift-and-parameterize refactor changed nothing (1e-10)."""
+        pytest.importorskip("aviary")
+        pytest.importorskip("openaerostruct")
+        from aviary.models.external_subsystems.open_aero_struct.OAS_wing_mass_analysis import (
+            user_mesh,
+        )
+
+        from hangar.avy.subsystems.wing_mesh import UPSTREAM_PLANFORM, parametric_mesh
+
+        ours = parametric_mesh(**UPSTREAM_PLANFORM)
+        theirs = user_mesh()
+        assert np.allclose(ours, theirs, atol=1e-10, rtol=0)
+        assert np.array_equal(ours, theirs)  # same ops, same order -> exact
+
+    def test_deck_derived_planform_from_large_single_aisle(self):
+        """Second-deck sanity: deck read + trapezoid derivation + mesh."""
+        pytest.importorskip("aviary")
+        from aviary.utils.process_input_decks import create_vehicle
+
+        from hangar.avy.subsystems.wing_mesh import (
+            mesh_sanity_issues,
+            parametric_mesh,
+            planform_from_deck,
+        )
+
+        values, _ = create_vehicle(
+            "models/aircraft/large_single_aisle_1/large_single_aisle_1_FLOPS.csv"
+        )
+        pf = planform_from_deck(values)
+        mesh = parametric_mesh(**pf)
+        assert mesh_sanity_issues(mesh) == []
+        # 737-class wing: half span ~17 m, root chord meters not millimeters
+        assert 12 < pf["half_span_m"] < 25
+        assert 3 < pf["root_chord_m"] < 12
+
+    @pytest.mark.slow
+    def test_deck_derived_sub_opt_plausible_wing_mass(self, tmp_path, monkeypatch):
+        """End-to-end WP4: deck-derived planform through a real sub-opt.
+
+        Order-of-magnitude check, not a golden -- the point is that the
+        wingbox solves on a planform that is not the advanced single
+        aisle's, and returns a transport-plausible wing mass.
+        """
+        pytest.importorskip("aviary")
+        pytest.importorskip("openaerostruct")
+        pytest.importorskip("ambiance")
+        from aviary.utils.process_input_decks import create_vehicle
+
+        from hangar.avy.subsystems.oas_wing_mass import run_wing_mass_sub_opt
+
+        values, _ = create_vehicle(
+            "models/aircraft/large_single_aisle_1/large_single_aisle_1_FLOPS.csv"
+        )
+        monkeypatch.chdir(tmp_path)  # OAS writes reports cwd-relative
+        wing_mass_lbm = run_wing_mass_sub_opt(
+            {"planform": "deck", "fuel_lbm": 35000.0}, aviary_values=values
+        )
+        print(f"\ndeck-derived large-single-aisle wing mass: {wing_mass_lbm:.1f} lbm")
+        assert 5000 < wing_mass_lbm < 60000

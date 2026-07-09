@@ -105,6 +105,13 @@ CONFIG_OPTIONS: dict[str, Any] = {
     # maxiter at the scipy default; None means "upstream behavior".
     "sub_opt_tol": None,
     "sub_opt_max_iter": None,
+    # Wing planform source (WP4): None = upstream's hard-coded
+    # advanced-single-aisle mesh; "deck" = simple trapezoid derived from
+    # Aircraft.Wing.{SPAN, AREA, TAPER_RATIO, SWEEP}; or a dict of
+    # explicit planform keys (see wing_mesh.PLANFORM_KEYS) merged onto the
+    # upstream constants.
+    "planform": None,
+    "kink_eta": 0.3,
 }
 
 VALID_CONFIG_KEYS = tuple(CONFIG_INPUTS) + tuple(CONFIG_OPTIONS)
@@ -142,6 +149,8 @@ def resolve_config(config: dict | None) -> dict:
                 f"{sorted(VALID_CONFIG_KEYS)}.{_suggest(key, VALID_CONFIG_KEYS)}"
             )
 
+    from hangar.avy.subsystems.wing_mesh import PLANFORM_KEYS
+
     resolved: dict[str, Any] = {}
     for key, default in CONFIG_OPTIONS.items():
         value = config.get(key, default)
@@ -151,9 +160,27 @@ def resolve_config(config: dict | None) -> dict:
         elif key == "sub_opt_max_iter" and value is not None:
             if not isinstance(value, int) or isinstance(value, bool) or value < 1:
                 raise ValueError(f"sub_opt_max_iter must be a positive integer, got {value!r}")
-        elif key in ("wing_weight_ratio",) or (key == "sub_opt_tol" and value is not None):
+        elif key in ("wing_weight_ratio", "kink_eta") or (
+            key == "sub_opt_tol" and value is not None
+        ):
             if not isinstance(value, (int, float)) or isinstance(value, bool) or value <= 0:
                 raise ValueError(f"{key} must be a positive number, got {value!r}")
+        elif key == "planform" and value is not None:
+            if isinstance(value, dict):
+                unknown = set(value) - set(PLANFORM_KEYS)
+                if unknown:
+                    raise ValueError(
+                        f"Unknown planform keys {sorted(unknown)}. "
+                        f"Valid: {sorted(PLANFORM_KEYS)}."
+                    )
+                for pf_key, pf_val in value.items():
+                    if not isinstance(pf_val, (int, float)) or isinstance(pf_val, bool):
+                        raise ValueError(f"planform.{pf_key} must be a number, got {pf_val!r}")
+            elif value != "deck":
+                raise ValueError(
+                    f"planform must be None, 'deck', or a dict of planform "
+                    f"keys, got {value!r}"
+                )
         resolved[key] = value
 
     n_box = resolved["num_box_cp"]
@@ -241,13 +268,47 @@ def _nested_driver_knobs(tol, max_iter):
         om.ScipyOptimizeDriver.run = orig
 
 
-def run_wing_mass_sub_opt(config: dict | None = None) -> float:
+def mesh_source(config: dict | None) -> str:
+    """Which mesh a config resolves to (for findings/telemetry)."""
+    planform = (config or {}).get("planform")
+    if planform is None:
+        return "upstream-hardcoded"
+    if planform == "deck":
+        return "deck-derived"
+    return "config"
+
+
+@contextlib.contextmanager
+def _mesh_patch(mesh):
+    """Serve a parametric mesh through the module-level user_mesh seam.
+
+    ``OAStructures.compute`` calls the module function ``user_mesh()``
+    directly, so a deck-driven planform is delivered by patching that
+    name for the duration of the compute -- same scoping argument as
+    ``_nested_driver_knobs``.
+    """
+    if mesh is None:
+        yield
+        return
+
+    import aviary.models.external_subsystems.open_aero_struct.OAS_wing_mass_analysis as _mod
+
+    orig = _mod.user_mesh
+    _mod.user_mesh = lambda: mesh
+    try:
+        yield
+    finally:
+        _mod.user_mesh = orig
+
+
+def run_wing_mass_sub_opt(config: dict | None = None, aviary_values=None) -> float:
     """Run one standalone nested sub-optimization; return wing mass in lbm.
 
     The precompute-mode workhorse: the same builder/group as the coupled
     path, executed once in a throwaway problem instead of inside Aviary's
     pre-mission. ``fuel_lbm`` must be resolvable to a number (the caller
-    supplies the deck capacity when config leaves it deck-driven).
+    supplies the deck capacity when config leaves it deck-driven), and
+    ``aviary_values`` must carry the deck when ``planform="deck"``.
     Caller must hold the runner's scratch context -- OAS writes report
     files cwd-relative like Aviary does.
     """
@@ -264,7 +325,9 @@ def run_wing_mass_sub_opt(config: dict | None = None) -> float:
 
     prob = om.Problem()
     prob.model.add_subsystem(
-        "wing_mass", builder.build_pre_mission(av.AviaryValues()), promotes=["*"]
+        "wing_mass",
+        builder.build_pre_mission(aviary_values or av.AviaryValues()),
+        promotes=["*"],
     )
     with _suppress_stdout():
         prob.setup()
@@ -298,11 +361,39 @@ def build_oas_wing_mass(config: dict | None = None, name: str = "oas_wing_mass")
     sub_opt_max_iter = resolved["sub_opt_max_iter"]
 
     class _TunedOAStructures(OAStructures):
-        """OAStructures with the nested driver knobs applied per compute."""
+        """OAStructures with driver knobs + optional parametric mesh."""
+
+        _hangar_mesh = None  # ndarray set by the builder, or None (upstream)
 
         def compute(self, inputs, outputs):
-            with _nested_driver_knobs(sub_opt_tol, sub_opt_max_iter):
-                super().compute(inputs, outputs)
+            with _mesh_patch(self._hangar_mesh):
+                with _nested_driver_knobs(sub_opt_tol, sub_opt_max_iter):
+                    super().compute(inputs, outputs)
+
+    def _resolve_mesh(aviary_inputs):
+        """Planform config -> mesh ndarray (None = upstream hard-coded)."""
+        from hangar.avy.subsystems.wing_mesh import (
+            UPSTREAM_PLANFORM,
+            mesh_sanity_issues,
+            parametric_mesh,
+            planform_from_deck,
+        )
+
+        planform = resolved["planform"]
+        if planform is None:
+            return None
+        if planform == "deck":
+            params = planform_from_deck(aviary_inputs, kink_eta=resolved["kink_eta"])
+        else:
+            params = {**UPSTREAM_PLANFORM, **planform}
+        mesh = parametric_mesh(**params)
+        issues = mesh_sanity_issues(mesh)
+        if issues:
+            raise ValueError(
+                f"Generated wing mesh failed sanity checks: {'; '.join(issues)}. "
+                f"Planform: {params}"
+            )
+        return mesh
 
     class _Builder(av.SubsystemBuilder):
         def __init__(self):
@@ -328,16 +419,18 @@ def build_oas_wing_mass(config: dict | None = None, name: str = "oas_wing_mass")
                 # Aircraft.Fuel.WING_FUEL_MASS_CAPACITY.
                 promotes_inputs.append(("fuel", av.Aircraft.Fuel.WING_FUEL_MASS_CAPACITY))
 
+            comp = _TunedOAStructures(
+                symmetry=True,
+                wing_weight_ratio=resolved["wing_weight_ratio"],
+                S_ref_type="projected",
+                n_point_masses=1,
+                num_twist_cp=resolved["num_twist_cp"],
+                num_box_cp=resolved["num_box_cp"],
+            )
+            comp._hangar_mesh = _resolve_mesh(aviary_inputs)
             group.add_subsystem(
                 "aerostructures",
-                _TunedOAStructures(
-                    symmetry=True,
-                    wing_weight_ratio=resolved["wing_weight_ratio"],
-                    S_ref_type="projected",
-                    n_point_masses=1,
-                    num_twist_cp=resolved["num_twist_cp"],
-                    num_box_cp=resolved["num_box_cp"],
-                ),
+                comp,
                 promotes_inputs=promotes_inputs,
                 # The whole integration: the optimized wingbox mass lands on
                 # Aircraft.Wing.MASS, overriding the FLOPS wing weight.
