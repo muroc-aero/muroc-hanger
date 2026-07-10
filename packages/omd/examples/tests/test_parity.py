@@ -586,3 +586,54 @@ class TestAvyOasWingParity:
             assert result["summary"][k] == pytest.approx(lane_a[k], **TOL_PARITY)
         for k, gold in GOLDEN.items():
             assert lane_a[k] == pytest.approx(gold, **TOL_GOLDEN)
+
+
+@requires_avy_venv
+class TestOasAvyWingMassParity:
+    """B2 loose coupling: OAS structural mass (main venv) -> avy/Sizing
+    override input (subprocess into .venv-avy), kg->lbm on the connection."""
+
+    @pytest.mark.slow
+    def test_coupled_wing_mass_parity(self, tmp_path):
+        sys.path.insert(0, str(EXAMPLES_DIR / "oas_avy_wing_mass"))
+        from oas_avy_wing_mass.lane_a.coupled_wing_mass import run as lane_a_run
+        from oas_avy_wing_mass.shared import (
+            GOLDEN,
+            METRICS,
+            TOL_GOLDEN,
+            TOL_PARITY,
+        )
+
+        lane_a = lane_a_run()
+
+        plan_path = (
+            EXAMPLES_DIR
+            / "oas_avy_wing_mass"
+            / "lane_b"
+            / "coupled_wing_mass"
+            / "plan.yaml"
+        )
+        result = run_plan(plan_path, mode="analysis", recording_level="minimal",
+                          db_path=tmp_path / "analysis.db")
+
+        # Composite plan -> per-component summaries
+        sizing = result["summary"]["components"]["sizing"]
+        wingbox = result["summary"]["components"]["wingbox"]
+        _print_comparison("OAS wing mass -> Aviary sizing (loose coupling)",
+                          lane_a, sizing, keys=METRICS,
+                          case="oas_avy_wing_mass")
+
+        assert result["status"] in ("completed", "converged")
+        assert sizing["converged"] == 1.0
+        # The sizing's wing mass must be exactly the OAS structural mass,
+        # units-converted -- proves the override input carried it across.
+        assert wingbox["structural_mass_kg"] == pytest.approx(
+            lane_a["structural_mass_kg"], **TOL_PARITY
+        )
+        assert sizing["wing_mass_lbm"] == pytest.approx(
+            lane_a["structural_mass_kg"] / 0.45359237, **TOL_PARITY
+        )
+        for k in METRICS:
+            assert sizing[k] == pytest.approx(lane_a[k], **TOL_PARITY)
+        for k, gold in GOLDEN.items():
+            assert lane_a[k] == pytest.approx(gold, **TOL_GOLDEN)

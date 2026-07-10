@@ -78,6 +78,15 @@ class AviarySizingComp(om.ExplicitComponent):
         # validated in the worker (hangar.avy's registry lives in .venv-avy,
         # not here) -- only the shape is checked at build time.
         self.options.declare("external_subsystems", types=list, default=[])
+        # {input_name: {"var": "aircraft:wing:mass", "units": "lbm",
+        #  "initial": 15000.0}} -- each entry becomes an OpenMDAO *input*
+        # whose value is written into the deck overrides per compute, so
+        # another component's output (e.g. an OAS wingbox structural mass)
+        # can drive an Aviary deck variable through a plan connection.
+        # Units convert on the OpenMDAO connection (declare the deck
+        # variable's units here); 'initial' is required because an
+        # unconnected input would otherwise silently override with 0.
+        self.options.declare("override_inputs", types=dict, default={})
         self.options.declare("optimizer", types=str, default="SLSQP")
         self.options.declare("max_iter", types=int, default=50)
         self.options.declare("avy_python", default=None, allow_none=True)
@@ -88,14 +97,19 @@ class AviarySizingComp(om.ExplicitComponent):
             self.add_input(
                 "target_range_nm", val=float(self.options["target_range_nm"])
             )
+        for name, entry in self.options["override_inputs"].items():
+            self.add_input(name, val=float(entry["initial"]), units=entry["units"])
         for name in _OUTPUT_NAMES:
             self.add_output(name, val=0.0)
+        fd_inputs = list(self.options["override_inputs"])
         if self.options["target_range_nm"] is not None:
+            fd_inputs.append("target_range_nm")
+        if fd_inputs:
             # Each FD step is a full Aviary optimization (~20 s): fine for
             # sweeps/DOE, punishing for gradient optimization.
             self.declare_partials(
                 [n for n in _OUTPUT_NAMES if n != "converged"],
-                "target_range_nm",
+                fd_inputs,
                 method="fd",
             )
 
@@ -115,10 +129,17 @@ class AviarySizingComp(om.ExplicitComponent):
     def compute(self, inputs, outputs) -> None:
         python = self._interpreter()
 
+        overrides = dict(self.options["overrides"])
+        for name, entry in self.options["override_inputs"].items():
+            # [value, units] pair -- the worker applies it as-is, and the
+            # value arrived already converted to entry['units'] by the
+            # OpenMDAO connection.
+            overrides[entry["var"]] = [float(inputs[name][0]), entry["units"]]
+
         spec: dict[str, Any] = {
             "deck": self.options["deck"],
             "phase_info_module": self.options["phase_info_module"],
-            "overrides": self.options["overrides"],
+            "overrides": overrides,
             "external_subsystems": self.options["external_subsystems"],
             "optimizer": self.options["optimizer"],
             "max_iter": self.options["max_iter"],
@@ -163,9 +184,13 @@ def build_avy_sizing(
     ``phase_info_module``, ``target_range_nm``, ``overrides``,
     ``external_subsystems`` ([{"name": ..., "config": {...}}] resolved by
     hangar.avy's registry inside the worker -- e.g. ``oas_wing_mass`` adds
-    a ~40 s nested OAS wingbox sub-optimization), ``optimizer``,
-    ``max_iter``, ``avy_python``, ``run_timeout_s``. The operating point may
-    override ``target_range_nm``.
+    a ~40 s nested OAS wingbox sub-optimization), ``override_inputs``
+    ({input_name: {var, units, initial}} -- OpenMDAO inputs whose values
+    are written into the deck overrides per compute, so another
+    component's output can drive an Aviary deck variable through a plan
+    connection), ``optimizer``, ``max_iter``, ``avy_python``,
+    ``run_timeout_s``. The operating point may override
+    ``target_range_nm``.
 
     Returns (problem, metadata). Problem has setup NOT called.
     """
@@ -182,6 +207,22 @@ def build_avy_sizing(
                 "avy/Sizing external_subsystems entries must be dicts with a "
                 f"'name' key (optional 'config'), got {entry!r}."
             )
+    override_inputs = component_config.get("override_inputs", {})
+    for name, entry in override_inputs.items():
+        if name in _OUTPUT_NAMES:
+            raise ValueError(
+                f"avy/Sizing override_inputs name {name!r} collides with a "
+                f"component output; pick another (e.g. '{name.replace('_lbm', '')}"
+                "_override_lbm')."
+            )
+        missing = {"var", "units", "initial"} - set(entry if isinstance(entry, dict) else ())
+        if missing:
+            raise ValueError(
+                f"avy/Sizing override_inputs[{name!r}] must be a dict with "
+                f"'var', 'units', and 'initial' keys; missing {sorted(missing)}. "
+                "'initial' is required -- an unconnected input would "
+                "otherwise silently override the deck variable with 0."
+            )
 
     target_range_nm = operating_points.get(
         "target_range_nm", component_config.get("target_range_nm")
@@ -195,6 +236,7 @@ def build_avy_sizing(
         target_range_nm=target_range_nm,
         overrides=component_config.get("overrides", {}),
         external_subsystems=list(subsystem_specs),
+        override_inputs=dict(override_inputs),
         optimizer=component_config.get("optimizer", "SLSQP"),
         max_iter=int(component_config.get("max_iter", 50)),
         avy_python=component_config.get("avy_python"),
@@ -209,6 +251,8 @@ def build_avy_sizing(
     if target_range_nm is not None:
         var_paths["target_range_nm"] = "target_range_nm"
         initial_values["target_range_nm"] = float(target_range_nm)
+    for name in override_inputs:
+        var_paths[name] = name
 
     metadata: FactoryMetadata = {
         "point_name": "aviary",

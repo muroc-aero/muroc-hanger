@@ -1,6 +1,8 @@
 # Plan: OAS inside Aviary — coupled aerostructural wing mass in hangar-avy and omd
 
-Status: **planned** (Phase 0 spike verified 2026-07-07; no implementation yet)
+Status: **implemented** (2026-07-10; all work packages landed -- see the
+result annotations in WP1 and the "Implementation results" section at the
+end. Remaining stretch items: WP4.3 upstream PR, blind-agent Lane C runs.)
 
 Goal: run OpenAeroStruct *inside* an Aviary sizing loop through the hangar
 stack — a physics-based wingbox wing mass replacing Aviary's empirical FLOPS
@@ -453,3 +455,66 @@ example and coupled mode is documented as IPOPT-territory.
 Anything that can invalidate goldens (WP1 mode gate, W3.1 partials choice)
 lands *before* the goldens are written; anything additive (mesh, CI leg,
 upstream PR) lands after.
+
+## Implementation results (2026-07-10)
+
+Everything above landed on `claude/aviary-hangar-package-44zznc` (PR #99).
+What was built, and what the measurements said:
+
+- **WP5**: `packages/avy/tests/test_avy_oas_contract.py` pins the upstream
+  example-namespace surface (component I/O names+units, builder promotion
+  onto `Aircraft.Wing.MASS`, `run_aviary(subsystems=)`, warm-start
+  attribute); pin-bump checklist notes on AVY_REF/OAS_REF; a CI `avy-venv`
+  job builds `.venv-avy` on every PR and runs the fast avy tests
+  (including these) for real, and nightly runs the full avy suites +
+  example goldens in `.venv-avy` (W5.3 taken).
+- **A1/A2**: openaerostruct (editable at OAS_REF) + ambiance in
+  `.venv-avy` and the avy Docker image; `hangar.avy.subsystems` registry
+  with strict config validation, IVC wiring (no post-setup set_val),
+  resampled defaults for coarse smoke configs, and the
+  `ScipyOptimizeDriver.run` seam for the nested-driver knobs
+  (`Problem.run_driver` is instance-bound by OpenMDAO's hooks and cannot
+  be patched).
+- **WP1**: measured budget table above. Coupled SLSQP converged (9 outer
+  iterations, 45.5 s, exactly ONE sub-opt evaluation) -- gate PASSED,
+  coupled mode shipped, and W3.1 dissolved (the FD partial is never
+  requested in this feed-forward topology).
+- **W3.2**: `run_precompute_sizing_problem` (sub-opt -> deck override ->
+  plain sizing, optional `feedback="mission_fuel"` fixed-point loop).
+  Measured **bit-identical** to coupled for the default config, as the
+  topology predicts.
+- **A3/A4**: `add_external_subsystem`/`list_external_subsystems` tools,
+  `run_sizing(subsystem_mode=)`, `wing_mass_lbm` in the design summary,
+  `subsystem.deck_scope`/`subsystem.wing_mass_applied` findings, CLI and
+  skill updates; per-tool parity example `single_aisle_oas_wing` (6/6:
+  golden anchor, coupled parity, precompute equivalence, FLOPS-contrast
+  -- OAS 14539.33 lbm vs FLOPS at >3% separation -- and two contract
+  tests). Goldens: gross 122876.48 lbm, fuel 13812.16 lbm, wing
+  14539.33 lbm at 1800 nmi.
+- **B1**: `avy/Sizing external_subsystems` pass-through into the worker
+  (hangar.avy registry resolves inside `.venv-avy`), `wing_mass_lbm`
+  output; omd example `avy_oas_wing` passed 1/1 (94 s).
+- **WP4**: `wing_mesh.parametric_mesh` reproduces upstream `user_mesh()`
+  **np.array_equal** (same ops, same order); `planform: "deck"` derives a
+  simple trapezoid from `Aircraft.Wing.{SPAN, AREA, TAPER_RATIO, SWEEP}`
+  (deck sweep applied as LE sweep -- stated in the mesh-source finding);
+  delivered through the module-level `user_mesh` seam per compute.
+  Second-deck check: 737-class `large_single_aisle_1` deck-derived
+  sub-opt gives 13547.9 lbm (transport-plausible). The deck-scope warning
+  now remediates to `planform: "deck"` and downgrades to an info
+  mesh-source finding when a parametric planform is active.
+- **B2**: `avy/Sizing override_inputs` ({input: {var, units, initial}} ->
+  deck overrides per compute; `initial` mandatory so an unconnected input
+  cannot silently override with 0; collision-checked against output
+  names); omd example `oas_avy_wing_mass` -- OAS aerostructural wing
+  (main venv, numpy<2) feeding `aircraft:wing:mass` across the venv
+  boundary with kg->lbm on the plan connection. Compositional Lane A
+  (raw OAS -> raw-Aviary override subprocess) vs the two-component plan:
+  **0.0000% on every metric**, and the sizing's wing mass IS the OAS
+  structural mass to round-off. Goldens: structural 6283.00 kg,
+  gross 122560.10 lbm at 1906 nmi. (Also fixed a pre-existing run.py
+  assumption that plan `solvers` is always a dict -- the schema's
+  list-with-target form is exercised here for the first time.)
+- The B2 `run_study` trade (OAS thickness/span vs Aviary gross mass)
+  remains a documented follow-on, per the plan's "DV sweep potential"
+  wording.

@@ -81,3 +81,57 @@ def test_external_subsystems_shape_validated():
     build = get_factory("avy/Sizing")
     with pytest.raises(ValueError, match="name"):
         build({"deck": DECK, "external_subsystems": ["oas_wing_mass"]}, {})
+
+
+def test_override_inputs_create_inputs_with_units():
+    build = get_factory("avy/Sizing")
+    prob, meta = build(
+        {
+            "deck": DECK,
+            "override_inputs": {
+                "wing_mass_override_lbm": {
+                    "var": "aircraft:wing:mass",
+                    "units": "lbm",
+                    "initial": 15000.0,
+                }
+            },
+        },
+        {},
+    )
+    prob.setup()
+    assert meta["var_paths"]["wing_mass_override_lbm"] == "wing_mass_override_lbm"
+    assert float(prob.get_val("wing_mass_override_lbm", units="lbm")[0]) == 15000.0
+    # units declared -> a kg-side connection would convert automatically
+    assert float(prob.get_val("wing_mass_override_lbm", units="kg")[0]) == pytest.approx(
+        15000.0 * 0.45359237
+    )
+
+
+def test_override_inputs_require_initial():
+    build = get_factory("avy/Sizing")
+    with pytest.raises(ValueError, match="initial"):
+        build(
+            {
+                "deck": DECK,
+                "override_inputs": {"wing_mass_override_lbm": {"var": "aircraft:wing:mass", "units": "lbm"}},
+            },
+            {},
+        )
+
+
+def test_override_inputs_reject_output_collision():
+    build = get_factory("avy/Sizing")
+    with pytest.raises(ValueError, match="collides"):
+        build(
+            {
+                "deck": DECK,
+                "override_inputs": {
+                    "wing_mass_lbm": {
+                        "var": "aircraft:wing:mass",
+                        "units": "lbm",
+                        "initial": 15000.0,
+                    }
+                },
+            },
+            {},
+        )

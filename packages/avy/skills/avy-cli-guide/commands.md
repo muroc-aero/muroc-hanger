@@ -12,6 +12,8 @@ also callable in interactive/script mode by its Python name. Invoke via
 | `load_aircraft_template` | `load-aircraft-template` | `--template`, `--name` (default "aircraft") |
 | `define_aircraft` | `define-aircraft` | `--aircraft-name`, `--overrides` (JSON dict: `{name: value}` or `{name: [value, units]}`) |
 | `configure_mission` | `configure-mission` | `--aircraft-name`, `--target-range-nm`, `--include-takeoff/--include-landing`, `--phase-options` (JSON dict) |
+| `list_external_subsystems` | `list-external-subsystems` | -- |
+| `add_external_subsystem` | `add-external-subsystem` | `--aircraft-name`, `--subsystem` (`oas_wing_mass`), `--config` (JSON dict) |
 
 Templates: `advanced_single_aisle`, `large_single_aisle_FLOPS`,
 `large_single_aisle_2_FLOPS`, `bench_FwFm`, `bench_GwFm` (runnable,
@@ -27,12 +29,26 @@ against Aviary's metadata (typos error with close matches). Common ones:
 
 | Tool | Subcommand | Key parameters |
 |------|------------|----------------|
-| `run_sizing` | `run-sizing` | `--aircraft-name`, `--optimizer` (SLSQP), `--max-iter` (50), `--run-name` |
+| `run_sizing` | `run-sizing` | `--aircraft-name`, `--optimizer` (SLSQP), `--max-iter` (50), `--subsystem-mode` (`coupled`/`precompute`; only matters with a subsystem attached), `--run-name` |
 | `run_off_design` | `run-off-design` | + `--mission-type` (`max_range`/`min_fuel`), `--mission-range-nm` (REQUIRED for min_fuel), `--mission-gross-mass-lbm`, `--cargo-mass-lbm`, `--num-pax` |
 | `run_payload_range` | `run-payload-range` | `--aircraft-name`, `--optimizer`, `--max-iter`, `--run-name` |
 
 All three return the versioned envelope. ALWAYS check
 `result.validation.passed` -- optimizer non-convergence does not raise.
+
+External subsystems: `add_external_subsystem` attaches `oas_wing_mass`
+(upstream Aviary's OpenAeroStruct wingbox integration -- a nested ~40 s
+sub-optimization whose wing mass replaces the FLOPS estimate on
+`Aircraft.Wing.MASS`). It then joins every analysis run for that
+aircraft. `run_sizing --subsystem-mode precompute` runs the sub-opt once
+up front and applies the result as a deck override (equivalent for this
+feed-forward subsystem, cheaper across repeat runs). Config highlights:
+`cruise_mach`, `fuel_lbm` (null = deck-driven), `num_box_cp`/`sub_opt_*`
+(smoke knobs), `planform` (null = upstream single-aisle mesh, `"deck"` =
+derive a simple trapezoid from the deck's span/area/taper/sweep, or an
+explicit planform dict). Check the `subsystem.deck_scope` and
+`subsystem.wing_mass_applied` findings; the OAS wing mass lands in
+`results.design.wing_mass_lbm`.
 
 Key result paths:
 
