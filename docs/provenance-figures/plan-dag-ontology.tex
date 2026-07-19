@@ -32,35 +32,12 @@
 %  Node placement is verified collision-free by check_layout.py (key
 %  "plan-dag"); keep the two in sync if you move nodes.
 % =====================================================================
-\documentclass[border=10pt]{standalone}
 
-\usepackage{xcolor}
-\usepackage{tikz}
-\usetikzlibrary{arrows.meta, positioning, shapes.multipart, fit, backgrounds, calc}
+\begin{figure*}[t]
+\centering
 
-% --- palette: muted grayscale base + light section tints --------------
-\definecolor{ink}{HTML}{1A1A1A}
-\definecolor{edge}{HTML}{404040}
-\definecolor{muted}{HTML}{6B6B6B}
-\definecolor{mslate}{HTML}{C9D4E0}   % Plan (composite)
-\definecolor{mblue}{HTML}{DCE7F7}    % model / topology
-\definecolor{mamber}{HTML}{FBEFCB}   % optimization problem
-\definecolor{mrose}{HTML}{F6DDD9}    % requirements / intent
-\definecolor{mgray}{HTML}{E4E7EB}    % analysis process
-
-\newcommand{\cn}[1]{\textbf{#1}}                       % class name
-\newcommand{\at}{\ttfamily\scriptsize\color{muted}}    % attribute text
-
-% --- output size: ONE knob. Rescales the whole figure (shapes + text)
-%     uniformly. Native width is ~9.7in; 0.65 emits ~6.3in so the PDF sits
-%     inside a single-column text block. Set 1.0 for full size, or size it
-%     at include time instead: \includegraphics[width=\linewidth]{...}.
-%     This is the densest figure -- it reads best full-width (figure*).
-\newcommand{\figscale}{0.65}
-
-\begin{document}
 \begin{tikzpicture}[
-    scale=\figscale, transform shape,
+    scale=0.65, transform shape,
     font=\sffamily,
     >=Stealth,
     % --- UML class box: name compartment + attribute compartment -----
@@ -202,4 +179,7 @@
  \tikz\node[fill=mgray,draw=muted,line width=0.3pt,minimum width=5mm,minimum height=3mm,inner sep=0pt]{};\,process\ \ (no formal meaning)};
 
 \end{tikzpicture}
-\end{document}
+
+\caption{The analysis-plan data model (UML class diagram).}
+\label{fig:plan-dag-ontology}
+\end{figure*}
