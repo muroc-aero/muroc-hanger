@@ -1,0 +1,528 @@
+[
+  {
+    "case": "paraboloid",
+    "model": null,
+    "ok": true,
+    "plan_id": "paraboloid_char",
+    "run_id": "run-20260718T075010-9b4e4f94",
+    "status": "converged",
+    "cost_usd": 1.3261,
+    "friction": [
+      "No tool errors encountered. Note: the two runs share one plan_id but have separate run_ids; the report format allows only one run_id field, so the evaluation run is recorded here \u2014 analysis run_id is run-20260718T075005-ed9190e0 (analysis_f_xy=39.0), optimize run_id is run-20260718T075010-9b4e4f94 (the reported run_id).",
+      "The paraboloid component takes x/y via operating_points, not config (config must be empty) \u2014 learned from the omd://reference resource, which named the component type and the f_xy objective/output name that the task deliberately withheld.",
+      "opt_x/opt_y are the optimizer's converged values (~6.66662 / ~-7.33331), which differ from the exact analytic 20/3 / -22/3 only at the SLSQP convergence tolerance."
+    ],
+    "metrics": [
+      {
+        "key": "analysis_f_xy",
+        "lane_a": 39.0,
+        "agent": 39.0,
+        "rel_err": 0.0,
+        "rtol": 1e-06,
+        "required": true,
+        "verdict": "PASS"
+      },
+      {
+        "key": "opt_f_xy",
+        "lane_a": -27.33333333,
+        "agent": -27.33333333,
+        "rel_err": 6.36e-11,
+        "rtol": 0.0001,
+        "required": true,
+        "verdict": "PASS"
+      },
+      {
+        "key": "opt_x",
+        "lane_a": 6.666666667,
+        "agent": 6.66661853,
+        "rel_err": 7.22e-06,
+        "rtol": 0.001,
+        "required": false,
+        "verdict": "PASS"
+      },
+      {
+        "key": "opt_y",
+        "lane_a": -7.333333333,
+        "agent": -7.333309424,
+        "rel_err": 3.26e-06,
+        "rtol": 0.001,
+        "required": false,
+        "verdict": "PASS"
+      }
+    ]
+  },
+  {
+    "case": "oas_aero_rect",
+    "model": null,
+    "ok": true,
+    "plan_id": "rect_wing_transonic",
+    "run_id": "run-20260718T075222-e8cae3c4",
+    "status": "completed",
+    "cost_usd": 1.5216,
+    "friction": [
+      "operating_points with a {value, units} tag were rejected at materialize ('units tag but canonical units unknown'); had to pass bare numeric values in the units the OAS factory expects (v in m/s, alpha in deg, rho in kg/m^3, re per metre, Mach dimensionless)",
+      "oas/AeroPoint config first failed with \"component config must contain 'surfaces' list\" -- the surface geometry keys (span, chord, num_x/num_y, symmetry, CD0, with_viscous...) must be nested inside a config.surfaces[] list, not placed at the top level of config",
+      "get_results variable filtering does not accept short names (CL, CD, CDi); it returned empty data until I used full OpenMDAO paths (aero_point_0.CL, aero_point_0.wing_perf.CDi/CDv/CDw)",
+      "record_conclusion left R1/R2 verdicts 'open' because the requirements carried no machine-checkable acceptance_criteria; the interpretation was captured via narrative + log_decision instead"
+    ],
+    "metrics": [
+      {
+        "key": "CL",
+        "lane_a": 0.4521766324,
+        "agent": 0.4521766324,
+        "rel_err": 0.0,
+        "rtol": 1e-06,
+        "required": true,
+        "verdict": "PASS"
+      },
+      {
+        "key": "CD",
+        "lane_a": 0.03508727635,
+        "agent": 0.03508727635,
+        "rel_err": 0.0,
+        "rtol": 1e-06,
+        "required": true,
+        "verdict": "PASS"
+      }
+    ]
+  },
+  {
+    "case": "oas_aerostruct_rect",
+    "model": null,
+    "ok": true,
+    "plan_id": "rect-wing-aerostruct",
+    "run_id": "run-20260718T075616-3e65951e",
+    "status": "completed",
+    "cost_usd": 2.0786,
+    "friction": [
+      "plan_set_operating_point rejected the operating-point dict when it contained the boolean 'with_viscous' ('not valid under any of the given schemas'); resolved by keeping with_viscous only in the surface config and passing only numeric flight fields in the operating point.",
+      "plan_add_requirement rejected priority 'high'; the allowed enum is ['primary','secondary','goal'] \u2014 used 'primary'.",
+      "First run_plan failed with materialize error 'component config must contain surfaces list': the oas/AerostructPoint factory needs the surface config wrapped in a surfaces:[ ... ] list, not flat top-level surface keys. Restructured and re-ran successfully.",
+      "get_results(summary=true) output (~138k chars / 7296 lines) exceeded the tool token limit; used the run_plan summary and record_conclusion metrics for full-precision values instead.",
+      "generate_plots(convergence) saved no PNG because in analysis mode there is a single driver evaluation (the coupling iterations live inside the coupled group's nonlinear solver, visible only via solver-level recording), so convergence was verified from the recorder case count + validation status rather than a driver-iteration plot."
+    ],
+    "metrics": [
+      {
+        "key": "CL",
+        "lane_a": 0.480648129,
+        "agent": 0.480648129,
+        "rel_err": 6.93e-16,
+        "rtol": 0.0001,
+        "required": true,
+        "verdict": "PASS"
+      },
+      {
+        "key": "CD",
+        "lane_a": 0.0359043953,
+        "agent": 0.0359043953,
+        "rel_err": 3.87e-16,
+        "rtol": 0.0001,
+        "required": true,
+        "verdict": "PASS"
+      }
+    ]
+  },
+  {
+    "case": "ocp_caravan_basic",
+    "model": null,
+    "ok": true,
+    "plan_id": "caravan_250nm_hop",
+    "run_id": "run-20260718T075851-f286f9f5",
+    "status": "completed",
+    "cost_usd": 1.1575,
+    "friction": [],
+    "metrics": [
+      {
+        "key": "fuel_burn_kg",
+        "lane_a": 171.3085674,
+        "agent": 171.3085674,
+        "rel_err": 0.0,
+        "rtol": 0.001,
+        "required": true,
+        "verdict": "PASS"
+      },
+      {
+        "key": "OEW_kg",
+        "lane_a": 2267.457779,
+        "agent": 2267.457779,
+        "rel_err": 0.0,
+        "rtol": 0.001,
+        "required": true,
+        "verdict": "PASS"
+      },
+      {
+        "key": "MTOW_kg",
+        "lane_a": 3970.0,
+        "agent": 3970.0,
+        "rel_err": 0.0,
+        "rtol": 1e-06,
+        "required": true,
+        "verdict": "PASS"
+      }
+    ]
+  },
+  {
+    "case": "ocp_caravan_full",
+    "model": null,
+    "ok": true,
+    "plan_id": "caravan_full_mission",
+    "run_id": "run-20260718T081543-153271f0",
+    "status": "completed",
+    "cost_usd": 1.3531,
+    "friction": [
+      "First write_plan used top-level plan_id/name/description; validate_plan rejected it \u2014 the schema requires a nested metadata:{id,name,version} block instead. Fixed by reading omd://plan-schema and re-authoring. No other errors; both runs converged first try."
+    ],
+    "metrics": [
+      {
+        "key": "fuel_burn_kg",
+        "lane_a": 172.3212565,
+        "agent": 172.3212565,
+        "rel_err": 0.0,
+        "rtol": 0.001,
+        "required": true,
+        "verdict": "PASS"
+      },
+      {
+        "key": "OEW_kg",
+        "lane_a": 2267.457779,
+        "agent": 2267.457779,
+        "rel_err": 0.0,
+        "rtol": 0.001,
+        "required": true,
+        "verdict": "PASS"
+      },
+      {
+        "key": "MTOW_kg",
+        "lane_a": 3970.0,
+        "agent": 3970.0,
+        "rel_err": 0.0,
+        "rtol": 1e-06,
+        "required": true,
+        "verdict": "PASS"
+      }
+    ]
+  },
+  {
+    "case": "ocp_hybrid_twin",
+    "model": null,
+    "ok": true,
+    "plan_id": "kingair-series-hybrid-fuelburn",
+    "run_id": "run-20260718T094904-3ca2936b",
+    "status": "completed",
+    "cost_usd": 1.7576265000000006,
+    "friction": [
+      "The omd://reference lists mission_params key 'battery_specific_energy' but does not state its units; I supplied 450 assuming Wh/kg (matching the task's stated 450 Wh/kg and OpenConcept's typical convention). The solve converged with physically plausible results, so the assumption appears correct, but the unit is not confirmable through the tools.",
+      "record_conclusion returned per-requirement verdict 'open' with empty criteria because my plan requirements had no machine-checkable acceptance_criteria; the numeric metrics come from run_plan's summary rather than the auto-derived conclusion, so verdicts are informational only.",
+      "MTOW is fixed at the template value (4581 kg) in analysis mode \u2014 it is an input, not a sized output; judging the hybrid weight penalty required an explicit baseline turboprop run (run-20260718T094919-be6e550c) for comparison rather than any single-run field."
+    ],
+    "metrics": [
+      {
+        "key": "fuel_burn_kg",
+        "lane_a": 391.8938314534514,
+        "agent": 391.8938314534514,
+        "rel_err": 0.0,
+        "rtol": 0.001,
+        "required": true,
+        "verdict": "PASS"
+      },
+      {
+        "key": "OEW_kg",
+        "lane_a": 2969.393833031629,
+        "agent": 2969.393833031629,
+        "rel_err": 0.0,
+        "rtol": 0.001,
+        "required": true,
+        "verdict": "PASS"
+      },
+      {
+        "key": "MTOW_kg",
+        "lane_a": 4581.0,
+        "agent": 4581.0,
+        "rel_err": 0.0,
+        "rtol": 1e-06,
+        "required": true,
+        "verdict": "PASS"
+      }
+    ]
+  },
+  {
+    "case": "oas_ocp_combined",
+    "model": null,
+    "ok": true,
+    "plan_id": "caravan-sidebyside",
+    "run_id": "run-20260718T095245-c05cce48",
+    "status": "completed",
+    "cost_usd": 1.519267,
+    "friction": [
+      "run_plan first failed with 'component config must contain surfaces list': the omd://reference implies oas/* geometry keys (span, taper, root_chord, num_x/num_y) are forwarded flat into a surface dict, but oas/AeroPoint actually requires the geometry nested under a config.surfaces: [ {...} ] list. The reference does not show this wrapping.",
+      "run_plan then failed with 'wing_type option not understood. Must be either CRM or rect': the natural value 'rectangular' is rejected; OAS expects the short token 'rect'. The reference lists wing_type as a forwarded key but gives no allowed-value set, so this required a guess-and-fix round.",
+      "No filesystem/Read access to the loaded omd-cli-guide companion files (oas-specifics.md, ocp-specifics.md), so exact OAS surface-config shape had to be discovered via run_plan error messages rather than read up front \u2014 the two failures above were the cost of that."
+    ],
+    "metrics": [
+      {
+        "key": "wing_CL",
+        "lane_a": 0.26981335961762853,
+        "agent": 0.26981335961762853,
+        "rel_err": 0.0,
+        "rtol": 1e-06,
+        "required": true,
+        "verdict": "PASS"
+      },
+      {
+        "key": "wing_CD",
+        "lane_a": 0.027666950498147262,
+        "agent": 0.02766695049814726,
+        "rel_err": 1.254004105796173e-16,
+        "rtol": 1e-06,
+        "required": true,
+        "verdict": "PASS"
+      },
+      {
+        "key": "fuel_burn_kg",
+        "lane_a": 171.30856738730913,
+        "agent": 171.30856738730913,
+        "rel_err": 0.0,
+        "rtol": 0.001,
+        "required": true,
+        "verdict": "PASS"
+      },
+      {
+        "key": "OEW_kg",
+        "lane_a": 2267.457778850918,
+        "agent": 2267.457778850918,
+        "rel_err": 0.0,
+        "rtol": 0.001,
+        "required": true,
+        "verdict": "PASS"
+      },
+      {
+        "key": "MTOW_kg",
+        "lane_a": 3970.0,
+        "agent": 3970.0,
+        "rel_err": 0.0,
+        "rtol": 1e-06,
+        "required": true,
+        "verdict": "PASS"
+      }
+    ]
+  },
+  {
+    "case": "ocp_oas_coupled",
+    "model": null,
+    "ok": true,
+    "plan_id": "caravan_vlm_drag",
+    "run_id": "run-20260718T095424-76bf544d",
+    "status": "completed",
+    "cost_usd": 1.0628149999999998,
+    "friction": [
+      "No blocking errors. The drag-slot provider identity (oas/vlm = pre-trained surrogate vs oas/vlm-direct = live VLM solve) had to be inferred from the omd://reference slot examples rather than an explicit 'surrogate vs live' flag; the run summary's slots.drag block (provider=oas/vlm) was used to confirm the swap took effect.",
+      "Wing-mesh parameter keys for the drag slot are num_x/num_y/num_twist (surrogate config), distinct from the OAS surface keys num_x/num_y/num_twist_cp used for standalone oas/* components; this naming difference is easy to mix up."
+    ],
+    "metrics": [
+      {
+        "key": "fuel_burn_kg",
+        "lane_a": 136.92304772919502,
+        "agent": 136.92304772919502,
+        "rel_err": 0.0,
+        "rtol": 0.001,
+        "required": true,
+        "verdict": "PASS"
+      },
+      {
+        "key": "OEW_kg",
+        "lane_a": 2267.457778850918,
+        "agent": 2267.457778850918,
+        "rel_err": 0.0,
+        "rtol": 0.001,
+        "required": true,
+        "verdict": "PASS"
+      },
+      {
+        "key": "MTOW_kg",
+        "lane_a": 3970.0,
+        "agent": 3970.0,
+        "rel_err": 0.0,
+        "rtol": 1e-06,
+        "required": true,
+        "verdict": "PASS"
+      }
+    ]
+  },
+  {
+    "case": "ocp_oas_direct",
+    "model": null,
+    "ok": true,
+    "plan_id": "caravan-live-vlm",
+    "run_id": "run-20260718T095644-ffcd4d49",
+    "status": "completed",
+    "cost_usd": 1.541258,
+    "friction": [
+      "Provider selection required inference: the reference lists both 'oas/vlm' and 'oas/vlm-direct' for the drag slot but does not spell out which is the surrogate vs the live direct-coupled solve; I inferred '-direct' = live tight coupling (confirmed in the run summary's slots.drag.provider echo).",
+      "The task warned to expect 'minutes rather than seconds' of runtime, but the run finished in 3.6 s. This is consistent with the required coarse 2x5 VLM mesh (a trivially small linear solve per node) rather than a fallback to a surrogate \u2014 the varying per-node drag and the real CL/CD/L_over_D polar point confirm a live solve. No action needed, but the timing hint is misleading for coarse meshes.",
+      "get_results(summary=true) returned ~7.8M characters (full recorder dump) and exceeded the token limit; it was unnecessary since the run_plan envelope already carries the three required metrics and the convergence/validation signals."
+    ],
+    "metrics": [
+      {
+        "key": "fuel_burn_kg",
+        "lane_a": 135.17662847471553,
+        "agent": 135.17662847471553,
+        "rel_err": 0.0,
+        "rtol": 0.001,
+        "required": true,
+        "verdict": "PASS"
+      },
+      {
+        "key": "OEW_kg",
+        "lane_a": 2267.457778850918,
+        "agent": 2267.457778850918,
+        "rel_err": 0.0,
+        "rtol": 0.001,
+        "required": true,
+        "verdict": "PASS"
+      },
+      {
+        "key": "MTOW_kg",
+        "lane_a": 3970.0,
+        "agent": 3970.0,
+        "rel_err": 0.0,
+        "rtol": 1e-06,
+        "required": true,
+        "verdict": "PASS"
+      }
+    ]
+  },
+  {
+    "case": "pyc_turbojet",
+    "model": null,
+    "ok": true,
+    "plan_id": "turbojet_sls_sizing",
+    "run_id": "run-20260718T155612-e1b9049b",
+    "status": "completed",
+    "cost_usd": null,
+    "scoring": "effect-based (recovered from sandbox recorder; agent report never delivered)",
+    "friction": [
+      "Reproducible harness bug, not an agent failure: on all three attempts (2026-07-17 evening, 2026-07-18 13:00, 2026-07-18 18:56) the blind agent authored the plan and completed the pyCycle design-point run within ~2-3 minutes (plan, N2, and recorder all written), after which the claude-agent-sdk bundled CLI hung indefinitely -- process alive with zero TCP connections and ~0% CPU -- so the agent's final report was never delivered to the harness.",
+      "Because the report was lost, this row is scored effect-based: Fn/TSFC/OPR were read from the agent's sandbox recorder (run-20260718T155612-e1b9049b) and compared against Lane A computed via the same design_analysis.run() import the harness uses. All three values match Lane A bit-for-bit (rel_err 0.0).",
+      "cost_usd is null because the SDK cost message is only emitted at result delivery, which never happened; actual spend for the scored attempt was likely ~$0.5-1.",
+      "The related ocp_hybrid_twin first-attempt crash ('Claude Code returned an error result: success') and this hang both sit in SDK/CLI result delivery -- a per-case wall-clock timeout plus effect-based scoring (as in hangar-evals) removes this whole failure class."
+    ],
+    "metrics": [
+      {
+        "key": "Fn",
+        "lane_a": 11799.998865160058,
+        "agent": 11799.998865160058,
+        "rel_err": 0.0,
+        "rtol": 0.0001,
+        "required": true,
+        "verdict": "PASS"
+      },
+      {
+        "key": "TSFC",
+        "lane_a": 0.782230738726323,
+        "agent": 0.782230738726323,
+        "rel_err": 0.0,
+        "rtol": 0.0001,
+        "required": true,
+        "verdict": "PASS"
+      },
+      {
+        "key": "OPR",
+        "lane_a": 13.5,
+        "agent": 13.5,
+        "rel_err": 0.0,
+        "rtol": 0.0001,
+        "required": true,
+        "verdict": "PASS"
+      }
+    ]
+  },
+  {
+    "case": "ocp_three_tool",
+    "model": null,
+    "ok": true,
+    "plan_id": "b738-physics-mission",
+    "run_id": "run-20260718T152903-87ff785c",
+    "status": "completed",
+    "cost_usd": 2.5913045,
+    "friction": [
+      "No filesystem/Read tool for skill companion files; worked around it by using omd read_plan on absolute repo paths to read tests/fixtures (ocp_pyc_prop_slot, ocp_vlm_drag_slot) and the slots-and-fidelity.md / ocp-specifics.md guides, which is where the exact slot/solver schemas live (not in omd://reference).",
+      "The omd://reference example labels the propulsion provider 'pyc/surrogate' but its slot-config keys (archetype, design_alt, design_MN, design_Fn, design_T4, engine_params.thermo_method) are documented only in slots-and-fidelity.md; the fixture used a different provider name (pyc/turbojet with design_alt/design_MN/... keys), so provider naming and key naming had to be cross-checked.",
+      "plan_add_requirement rejected priority='high'; the allowed enum is ['primary','secondary','goal'] and is not surfaced in the reference \u2014 fixed by retrying with 'primary'.",
+      "get_results with summary=true returned a 145k-char / 6,737-line payload that exceeded the token limit, and get_results with a variables=[...] filter returned an empty data dict (final case data not exposed as named vars at recording_level=driver). Authoritative metrics were taken from the run_plan response summary instead.",
+      "The run summary's per-node 'thrust_kN' profile values are absurd (~1e10 'kN') \u2014 a units/labeling artifact in the surrogate thrust reporting. It does not affect the reported fuel_burn/OEW/MTOW metrics but is a data-quality bug worth noting.",
+      "Physical realism caveat (not a tool error): fuel_burn (2449.7 kg) is ~1/3 of a real 737-800's 1500 NM block fuel; the automated conclusion verdict 'violates' R1's lower bound, confirming the surrogates+3-node integration bias the estimate low."
+    ],
+    "metrics": [
+      {
+        "key": "fuel_burn_kg",
+        "lane_a": 2449.7040022398833,
+        "agent": 2449.7040022398833,
+        "rel_err": 0.0,
+        "rtol": 0.001,
+        "required": true,
+        "verdict": "PASS"
+      },
+      {
+        "key": "OEW_kg",
+        "lane_a": 41871.0,
+        "agent": 41871.0,
+        "rel_err": 0.0,
+        "rtol": 0.001,
+        "required": true,
+        "verdict": "PASS"
+      },
+      {
+        "key": "MTOW_kg",
+        "lane_a": 79002.0,
+        "agent": 79002.0,
+        "rel_err": 0.0,
+        "rtol": 1e-06,
+        "required": true,
+        "verdict": "PASS"
+      }
+    ]
+  },
+  {
+    "case": "evt_open_sizing",
+    "model": null,
+    "ok": true,
+    "plan_id": "archer_midnight_sizing",
+    "run_id": "run-20260718T155331-feeb8e87",
+    "status": "completed",
+    "cost_usd": 1.0711935000000001,
+    "friction": [
+      "The 'archer_midnight' template name is not surfaced by any list tool; it is only discoverable by reading the omd://reference resource, which documents both the template and the three evt/* factories (evt/Sizing native-gradient vs evt/SizingFD black-box fallback).",
+      "'total_mission_energy_kw_hr' (65.95) excludes the reserve mission; reserve energy is a separate scalar (total_reserve_mission_energy_kw_hr = 14.73). Reported the main-mission total as the task's 'total mission energy'.",
+      "record_conclusion evaluated the 'in' range criterion for sized_mtow_kg with passed=null (range comparators are not auto-scored), though the overall requirement verdict was 'satisfies'."
+    ],
+    "metrics": [
+      {
+        "key": "sized_mtow_kg",
+        "lane_a": 2019.4747392197662,
+        "agent": 2019.4747392197662,
+        "rel_err": 0.0,
+        "rtol": 0.001,
+        "required": true,
+        "verdict": "PASS"
+      },
+      {
+        "key": "total_mission_energy_kw_hr",
+        "lane_a": 65.94958320185691,
+        "agent": 65.94958320185691,
+        "rel_err": 0.0,
+        "rtol": 0.001,
+        "required": true,
+        "verdict": "PASS"
+      },
+      {
+        "key": "peak_power_kw",
+        "lane_a": 846.5207929185908,
+        "agent": 846.5207929185908,
+        "rel_err": 0.0,
+        "rtol": 0.001,
+        "required": true,
+        "verdict": "PASS"
+      }
+    ]
+  }
+]
