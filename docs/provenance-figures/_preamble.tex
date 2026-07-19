@@ -1,0 +1,80 @@
+% =====================================================================
+%  Shared preamble for the Hangar architecture / provenance figures.
+% ---------------------------------------------------------------------
+%  Each figure .tex in this directory is now a bare `figure*` float meant
+%  to be \input into a paper (not a standalone document). The TikZ
+%  libraries, colour palette, and in-node text macros they all rely on
+%  live here so they are defined exactly once.
+%
+%  In your paper, after \usepackage{tikz} and \usepackage{xcolor}:
+%
+%      \input{docs/provenance-figures/_preamble}   % or copy its body
+%      ...
+%      \input{docs/provenance-figures/omd-provagent-ontology}
+%
+%  To compile/preview the figures on their own, see _preview.tex.
+% =====================================================================
+
+\usetikzlibrary{arrows.meta, positioning, shapes.geometric,
+                shapes.multipart, fit, backgrounds, calc}
+
+% --- muted grayscale base --------------------------------------------
+\definecolor{ink}{HTML}{1A1A1A}
+\definecolor{edge}{HTML}{404040}
+\definecolor{muted}{HTML}{6B6B6B}
+
+% --- W3C PROV class palette (prov-metamodel, session-graph, omd-provagent)
+\definecolor{entfill}{HTML}{FBF3D3}   % PROV entity   — soft yellow
+\definecolor{entline}{HTML}{9C8B33}
+\definecolor{actfill}{HTML}{DDE7F7}   % PROV activity — soft blue
+\definecolor{actline}{HTML}{3F6FB0}
+\definecolor{agtfill}{HTML}{FBE1C0}   % PROV agent    — soft orange
+\definecolor{agtline}{HTML}{BE843A}
+
+% --- plan-dag UML section tints --------------------------------------
+\definecolor{mslate}{HTML}{C9D4E0}    % Plan (composite)
+\definecolor{mblue}{HTML}{DCE7F7}     % model / topology
+\definecolor{mamber}{HTML}{FBEFCB}    % optimization problem
+\definecolor{mrose}{HTML}{F6DDD9}     % requirements / intent
+\definecolor{mgray}{HTML}{E4E7EB}     % analysis process
+
+% --- execution-architecture: leaf analysis tool (soft green) ---------
+\definecolor{toolfill}{HTML}{D8E9CF}
+\definecolor{toolline}{HTML}{4E8A5E}
+
+% --- shared in-node text switches ------------------------------------
+\newcommand{\nattr}{\normalfont\ttfamily\scriptsize\color{muted}}
+\newcommand{\nhead}{\normalfont\sffamily\bfseries}
+\newcommand{\cn}[1]{\textbf{#1}}                    % UML class name
+\newcommand{\at}{\ttfamily\scriptsize\color{muted}} % UML attribute text
+
+% =====================================================================
+%  Code-listing style for the plan-YAML figures (ocp-oas-plan-listing).
+%  Requires the `listings` package (ships with TeX Live / MiKTeX).
+% =====================================================================
+\usepackage{listings}
+\definecolor{codebg}{HTML}{FAF9F5}    % near-white paper panel
+
+\lstdefinelanguage{planyaml}{
+  morecomment=[l]{\#},
+  morestring=[b]",
+  morestring=[b]',
+  alsoletter={_./|},                  % keep dotted/slashed keys as one token
+  sensitive=true,
+}
+% Position-based key colouring: the default (key) style is blueprint-blue
+% bold; at each `:` we flip to ink/medium for the value. This colours keys
+% by position — not by word — so words like "drag" inside a value string
+% are NOT mis-highlighted.
+\lstdefinestyle{planyaml}{
+  language=planyaml,
+  basicstyle=\ttfamily\small\color{actline}\bfseries,
+  moredelim=**[l][\color{ink}\mdseries]{:},
+  commentstyle=\ttfamily\small\color{toolline}\itshape,
+  stringstyle=\color{ink}\mdseries,
+  showstringspaces=false,
+  keepspaces=true, columns=fullflexible, breaklines=false, tabsize=2,
+  frame=single, framesep=5pt, rulecolor=\color{muted},
+  backgroundcolor=\color{codebg},
+  aboveskip=2pt, belowskip=0pt,
+}

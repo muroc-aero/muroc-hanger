@@ -1,10 +1,10 @@
 {
-  "timestamp_utc": "2026-07-02T10:38:17+00:00",
-  "git_sha": "9189d26",
+  "timestamp_utc": "2026-07-17T00:23:31+00:00",
+  "git_sha": "ac32a6f",
   "lanes": "all",
   "quick": false,
   "k": null,
   "pytest_exit_code": 0,
-  "n_comparisons": 18,
+  "n_comparisons": 26,
   "results_jsonl": "paper/results/lane_parity.jsonl"
 }

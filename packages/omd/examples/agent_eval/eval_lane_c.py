@@ -67,21 +67,29 @@ class Case:
         self.lane_a_modules = sorted({m.lane_a_module for m in self.metrics})
 
 
-# Mission supplement mirrors ocp_oas_coupled/shared.py MISSION (the lane_c
-# prompt points at the ocp_caravan_basic example for these, which a blind
-# agent cannot read).
-_COUPLED_MISSION_SUPPLEMENT = """
-Mission profile (same as the baseline Caravan basic mission):
-- Climb: 850 ft/min at 104 kn EAS
-- Cruise: 129 kn EAS
-- Descent: 400 ft/min at 100 kn EAS
-- 11 integration nodes per phase
-"""
+# Every case uses its example's *_open.prompt.md: the open prompts state the
+# engineering goal and the physical inputs (geometry, mission profile, design
+# point) but deliberately name no factory, slot provider, parameter key, or
+# tool-call sequence -- the agent must discover the workflow from the server's
+# own affordances (tool descriptions, omd://reference).
+#
+# ocp_pyc_coupled has an open prompt but is NOT scored here: its tool-surface
+# path shares the Lane B materializer, whose weight-slot precedence forces an
+# OEW passthrough (~8% OEW / ~4% fuel gap vs Lane A -- see the example's
+# TODO.md), so an agent cannot match the Lane A reference through the tools.
+
+def _ocp_metrics(module: str) -> list[Metric]:
+    return [
+        Metric("fuel_burn_kg", module, "fuel_burn_kg", rtol=1e-3),
+        Metric("OEW_kg", module, "OEW_kg", rtol=1e-3),
+        Metric("MTOW_kg", module, "MTOW_kg", rtol=1e-6),
+    ]
+
 
 CASES: dict[str, Case] = {
     "paraboloid": Case(
         example="paraboloid",
-        prompt_file="all.prompt.md",
+        prompt_file="all_open.prompt.md",
         metrics=[
             Metric("analysis_f_xy", "analysis", "f_xy", rtol=1e-6),
             Metric("opt_f_xy", "optimization", "f_xy", rtol=1e-4),
@@ -91,31 +99,76 @@ CASES: dict[str, Case] = {
             Metric("opt_y", "optimization", "y", rtol=1e-3, required=False),
         ],
     ),
+    "oas_aero_rect": Case(
+        example="oas_aero_rect",
+        prompt_file="aero_analysis_open.prompt.md",
+        metrics=[
+            Metric("CL", "aero_analysis", "CL", rtol=1e-6),
+            Metric("CD", "aero_analysis", "CD", rtol=1e-6),
+        ],
+    ),
+    # 1e-4 leaves headroom for the agent's coupled-solver tolerance choice;
+    # a wrong mesh or condition still misses by orders of magnitude.
+    "oas_aerostruct_rect": Case(
+        example="oas_aerostruct_rect",
+        prompt_file="aerostruct_analysis_open.prompt.md",
+        metrics=[
+            Metric("CL", "aerostruct_analysis", "CL", rtol=1e-4),
+            Metric("CD", "aerostruct_analysis", "CD", rtol=1e-4),
+        ],
+    ),
     "ocp_caravan_basic": Case(
         example="ocp_caravan_basic",
-        prompt_file="basic_mission.prompt.md",
+        prompt_file="basic_mission_open.prompt.md",
+        metrics=_ocp_metrics("basic_mission"),
+    ),
+    "ocp_caravan_full": Case(
+        example="ocp_caravan_full",
+        prompt_file="full_mission_open.prompt.md",
+        metrics=_ocp_metrics("full_mission"),
+    ),
+    "ocp_hybrid_twin": Case(
+        example="ocp_hybrid_twin",
+        prompt_file="hybrid_mission_open.prompt.md",
+        metrics=_ocp_metrics("hybrid_mission"),
+    ),
+    "oas_ocp_combined": Case(
+        example="oas_ocp_combined",
+        prompt_file="wing_mission_open.prompt.md",
         metrics=[
-            Metric("fuel_burn_kg", "basic_mission", "fuel_burn_kg", rtol=1e-3),
-            Metric("OEW_kg", "basic_mission", "OEW_kg", rtol=1e-3),
-            Metric("MTOW_kg", "basic_mission", "MTOW_kg", rtol=1e-6),
+            Metric("wing_CL", "wing_mission", "wing_CL", rtol=1e-6),
+            Metric("wing_CD", "wing_mission", "wing_CD", rtol=1e-6),
+            *_ocp_metrics("wing_mission"),
         ],
     ),
     "ocp_oas_coupled": Case(
         example="ocp_oas_coupled",
-        prompt_file="coupled_mission.prompt.md",
-        supplement=_COUPLED_MISSION_SUPPLEMENT,
+        prompt_file="coupled_mission_open.prompt.md",
+        metrics=_ocp_metrics("coupled_mission"),
+    ),
+    "ocp_oas_direct": Case(
+        example="ocp_oas_direct",
+        prompt_file="direct_coupled_mission_open.prompt.md",
+        metrics=_ocp_metrics("direct_coupled_mission"),
+    ),
+    "pyc_turbojet": Case(
+        example="pyc_turbojet",
+        prompt_file="turbojet_design_open.prompt.md",
         metrics=[
-            Metric("fuel_burn_kg", "coupled_mission", "fuel_burn_kg", rtol=1e-3),
-            Metric("OEW_kg", "coupled_mission", "OEW_kg", rtol=1e-3),
-            Metric("MTOW_kg", "coupled_mission", "MTOW_kg", rtol=1e-6),
+            Metric("Fn", "design_analysis", "Fn", rtol=1e-4),
+            Metric("TSFC", "design_analysis", "TSFC", rtol=1e-4),
+            Metric("OPR", "design_analysis", "OPR", rtol=1e-4),
         ],
     ),
-    # Open-ended evt sizing: the prompt (sizing_open) states the engineering
-    # goal but names no factory, template, solver, or parameter keys -- the
-    # agent must self-serve from omd://reference to land on evt/Sizing plus the
-    # built-in archer_midnight template. Lane A loads that vehicle from its
-    # JSON; the template is vendored from the same file, so a template-built
-    # result matches the file-based reference to round-off.
+    "ocp_three_tool": Case(
+        example="ocp_three_tool",
+        prompt_file="coupled_mission_open.prompt.md",
+        metrics=_ocp_metrics("coupled_mission"),
+    ),
+    # Lane A loads the archer-midnight vehicle from its JSON config file; the
+    # built-in template is vendored from that same file, so the template-built
+    # result the blind agent can reach matches the file-based reference to
+    # round-off.
     "evt_open_sizing": Case(
         example="evt_native_sizing",
         prompt_file="sizing_open.prompt.md",
@@ -162,18 +215,12 @@ You are an engineering analysis agent evaluating the omd MCP server.
 Complete the task below using ONLY the omd MCP tools (mcp__omd__*).
 
 HARD RULES:
-- You have no filesystem, shell, or web access; author and run the plan
-  entirely through the tool workspace (relative paths resolve server-side).
-- References to `omd-cli` or skill files in the task text do not apply:
-  use the equivalent MCP tools instead, and skip deliverables that only
-  make sense for a filesystem client.
+- You have no filesystem, shell, or web access; work entirely through
+  the tool workspace (relative paths resolve server-side).
+- The task states the engineering goal, not the tool procedure. Work out
+  the right calls and their order from the server's own affordances:
+  tool descriptions, the omd://reference resource, and error messages.
 - If a tool call fails, adapt and retry with corrected inputs.
-
-WORKFLOW (the server's required order):
-start_session -> author plan (plan_init, plan_add_component, ...) ->
-log_decision -> validate_plan -> review_plan -> run_plan ->
-get_results / get_run_summary -> generate_plots -> record_conclusion ->
-get_provenance -> export_session_graph.
 
 --- TASK ---
 """
@@ -344,11 +391,28 @@ async def main() -> int:
     parser.add_argument("--save-json", type=Path, default=None,
                         help="Write per-case scored results to this JSON file "
                              "(consumed by paper/make_tables.py)")
+    parser.add_argument("--resume", action="store_true",
+                        help="Skip cases already present in --save-json "
+                             "(reuse their saved rows)")
     args = parser.parse_args()
 
     names = list(CASES) if "all" in args.cases else list(dict.fromkeys(args.cases))
     all_ok = True
     saved: list[dict] = []
+
+    if args.resume and args.save_json and args.save_json.exists():
+        saved = json.loads(args.save_json.read_text())
+        done = {row["case"] for row in saved}
+        skipped = [n for n in names if n in done]
+        names = [n for n in names if n not in done]
+        all_ok = all(row.get("ok") for row in saved)
+        if skipped:
+            print(f"Resuming: reusing saved results for {', '.join(skipped)}")
+
+    def _checkpoint() -> None:
+        if args.save_json:
+            args.save_json.parent.mkdir(parents=True, exist_ok=True)
+            args.save_json.write_text(json.dumps(saved, indent=2) + "\n")
 
     for name in names:
         case = CASES[name]
@@ -361,9 +425,20 @@ async def main() -> int:
         tmp = Path(tempfile.mkdtemp(prefix=f"lane_c_eval_{name}_"))
         print(f"  omd data root: {tmp}")
         print("  Running blind agent (omd MCP tools only)...")
-        text, cost = await run_agent(
-            build_prompt(case), tmp, args.model, args.max_turns, args.verbose,
-        )
+        try:
+            text, cost = await run_agent(
+                build_prompt(case), tmp, args.model, args.max_turns,
+                args.verbose,
+            )
+        except Exception as exc:  # noqa: BLE001 - SDK/CLI errors must not
+            # kill the remaining cases; record and move on.
+            print(f"  ERROR: agent run failed: {exc}")
+            all_ok = False
+            saved.append({"case": name, "model": args.model, "ok": False,
+                          "error": f"agent run failed: {exc}",
+                          "cost_usd": None, "metrics": []})
+            _checkpoint()
+            continue
         if cost is not None:
             print(f"  Agent cost: ${cost:.4f}")
 
@@ -374,6 +449,7 @@ async def main() -> int:
             all_ok = False
             saved.append({"case": name, "model": args.model, "ok": False,
                           "error": str(exc), "cost_usd": cost, "metrics": []})
+            _checkpoint()
             continue
 
         print(f"  plan_id={report.get('plan_id')}  "
@@ -387,14 +463,14 @@ async def main() -> int:
             "status": report.get("status"), "cost_usd": cost,
             "friction": report.get("friction") or [], "metrics": rows,
         })
+        _checkpoint()
 
         if not args.keep_data:
             import shutil
             shutil.rmtree(tmp, ignore_errors=True)
 
     if args.save_json:
-        args.save_json.parent.mkdir(parents=True, exist_ok=True)
-        args.save_json.write_text(json.dumps(saved, indent=2) + "\n")
+        _checkpoint()
         print(f"\nSaved scored results to {args.save_json}")
 
     print(f"\n{'=' * 70}\nOverall: {'PASS' if all_ok else 'FAIL'}\n{'=' * 70}")

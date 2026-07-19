@@ -115,9 +115,17 @@ AGENT_METRIC_MAP: dict[tuple[str, str], tuple[str, str]] = {
     ("paraboloid", "opt_x"): ("paraboloid_optimization", "x"),
     ("paraboloid", "opt_y"): ("paraboloid_optimization", "y"),
 }
-for _case in ("ocp_caravan_basic", "ocp_oas_coupled"):
+for _case in ("ocp_caravan_basic", "ocp_caravan_full", "ocp_hybrid_twin",
+              "ocp_oas_coupled", "ocp_oas_direct", "ocp_three_tool"):
     for _m in ("fuel_burn_kg", "OEW_kg", "MTOW_kg"):
         AGENT_METRIC_MAP[(_case, _m)] = (_case, _m)
+for _case in ("oas_aero_rect", "oas_aerostruct_rect"):
+    for _m in ("CL", "CD"):
+        AGENT_METRIC_MAP[(_case, _m)] = (_case, _m)
+for _m in ("wing_CL", "wing_CD", "fuel_burn_kg", "OEW_kg", "MTOW_kg"):
+    AGENT_METRIC_MAP[("oas_ocp_combined", _m)] = ("oas_ocp_combined", _m)
+for _m in ("Fn", "TSFC", "OPR"):
+    AGENT_METRIC_MAP[("pyc_turbojet", _m)] = ("pyc_turbojet", _m)
 for _m in ("sized_mtow_kg", "total_mission_energy_kw_hr", "peak_power_kw"):
     AGENT_METRIC_MAP[("evt_open_sizing", _m)] = ("evt_native_sizing", _m)
 

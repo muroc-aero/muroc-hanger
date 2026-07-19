@@ -28,6 +28,7 @@ from hangar.omd.tools.authoring import (
     plan_add_component,
     plan_add_dv,
     plan_init,
+    plan_set_composition_policy,
     plan_set_objective,
     plan_set_operating_point,
     plan_set_solver,
@@ -68,19 +69,37 @@ async def _assemble_and_validate(plan_dir: str) -> str:
     return plan_yaml
 
 
-def _mission_config(mission: dict, slots: dict | None = None) -> dict:
-    """Build an ocp/BasicMission component config from a shared MISSION dict."""
+def _mission_config(
+    mission: dict,
+    slots: dict | None = None,
+    *,
+    template: str = "caravan",
+    architecture: str = "turboprop",
+    solver_settings: dict | None = None,
+    extra: dict | None = None,
+) -> dict:
+    """Build an ocp mission component config from a shared MISSION dict."""
     config = {
-        "aircraft_template": "caravan",
-        "architecture": "turboprop",
+        "aircraft_template": template,
+        "architecture": architecture,
         "num_nodes": mission["num_nodes"],
         "mission_params": {
             k: v for k, v in mission.items() if k != "num_nodes"
         },
     }
+    if solver_settings:
+        config["solver_settings"] = solver_settings
     if slots:
         config["slots"] = slots
+    if extra:
+        config.update(extra)
     return config
+
+
+# The Newton settings the OCP Lane B plans embed in their component config.
+_OCP_NEWTON = {
+    "solver_type": "newton", "maxiter": 20, "atol": 1.0e-10, "rtol": 1.0e-10,
+}
 
 
 async def _set_newton_solver(plan_dir: str) -> None:
@@ -265,6 +284,358 @@ class TestEvtNativeSizingLaneC:
         assert summary["converged"] == 1.0
         for k in keys:
             assert summary[k] == pytest.approx(lane_a[k], **TOL_PARITY)
+
+
+class TestOASAeroLaneC:
+
+    @pytest.mark.slow
+    async def test_aero_analysis_parity(self):
+        sys.path.insert(0, str(EXAMPLES_DIR / "oas_aero_rect"))
+        from oas_aero_rect.lane_a.aero_analysis import run as lane_a_run
+        from oas_aero_rect.shared import FLIGHT, WING
+
+        lane_a = lane_a_run()
+
+        await plan_init(
+            "lane-c-oas-aero", plan_id="lane-c-oas-aero",
+            name="Rect wing VLM analysis (Lane C tool surface)",
+        )
+        await plan_add_component(
+            "lane-c-oas-aero", comp_id="wing", comp_type="oas/AeroPoint",
+            config={"surfaces": [dict(WING)]},
+        )
+        await plan_set_operating_point("lane-c-oas-aero", fields=dict(FLIGHT))
+        plan_yaml = await _assemble_and_validate("lane-c-oas-aero")
+
+        env = await run_plan(plan_yaml, mode="analysis")
+        summary = _summary(env)
+
+        _print_comparison("OAS Aero Analysis (Lane C)", lane_a, summary,
+                          keys=["CL", "CD"],
+                          case="oas_aero_rect", lane_label="C")
+
+        assert summary["CL"] == pytest.approx(lane_a["CL"], rel=1e-6)
+        assert summary["CD"] == pytest.approx(lane_a["CD"], rel=1e-6)
+
+
+class TestOASAerostructLaneC:
+
+    @pytest.mark.slow
+    async def test_aerostruct_analysis_parity(self):
+        sys.path.insert(0, str(EXAMPLES_DIR / "oas_aerostruct_rect"))
+        from oas_aerostruct_rect.lane_a.aerostruct_analysis import (
+            run as lane_a_run,
+        )
+        from oas_aerostruct_rect.shared import FLIGHT, WING
+
+        lane_a = lane_a_run()
+
+        await plan_init(
+            "lane-c-oas-aerostruct", plan_id="lane-c-oas-aerostruct",
+            name="Rect wing aerostruct analysis (Lane C tool surface)",
+        )
+        await plan_add_component(
+            "lane-c-oas-aerostruct", comp_id="wing",
+            comp_type="oas/AerostructPoint",
+            config={"surfaces": [dict(WING)]},
+        )
+        # Match the Lane B solvers.yaml (not shared.SOLVERS, which the Lane A
+        # script applies to its own hand-built coupled group).
+        await plan_set_solver(
+            "lane-c-oas-aerostruct",
+            nonlinear="NewtonSolver", linear="DirectSolver",
+            nonlinear_options={"maxiter": 20, "atol": 1.0e-6},
+        )
+        await plan_set_operating_point(
+            "lane-c-oas-aerostruct", fields=dict(FLIGHT)
+        )
+        plan_yaml = await _assemble_and_validate("lane-c-oas-aerostruct")
+
+        env = await run_plan(plan_yaml, mode="analysis")
+        summary = _summary(env)
+
+        _print_comparison("OAS Aerostruct Analysis (Lane C)", lane_a, summary,
+                          keys=["CL", "CD"],
+                          case="oas_aerostruct_rect", lane_label="C")
+
+        assert summary["CL"] == pytest.approx(lane_a["CL"], rel=1e-6)
+        assert summary["CD"] == pytest.approx(lane_a["CD"], rel=1e-6)
+
+
+class TestOCPCaravanFullLaneC:
+
+    @pytest.mark.slow
+    async def test_full_mission_parity(self):
+        sys.path.insert(0, str(EXAMPLES_DIR / "ocp_caravan_full"))
+        from ocp_caravan_full.lane_a.full_mission import run as lane_a_run
+        from ocp_caravan_full.shared import MISSION
+
+        lane_a = lane_a_run()
+
+        await plan_init(
+            "lane-c-caravan-full", plan_id="lane-c-caravan-full",
+            name="Caravan full mission (Lane C tool surface)",
+        )
+        await plan_add_component(
+            "lane-c-caravan-full", comp_id="caravan-mission",
+            comp_type="ocp/FullMission",
+            config=_mission_config(MISSION, solver_settings=dict(_OCP_NEWTON)),
+        )
+        plan_yaml = await _assemble_and_validate("lane-c-caravan-full")
+
+        env = await run_plan(plan_yaml, mode="analysis")
+        summary = _summary(env)
+
+        _print_comparison(
+            "OCP Caravan Full Mission (Lane C)", lane_a, summary,
+            keys=["fuel_burn_kg", "OEW_kg", "MTOW_kg"],
+            case="ocp_caravan_full", lane_label="C",
+        )
+
+        assert summary["fuel_burn_kg"] == pytest.approx(
+            lane_a["fuel_burn_kg"], rel=1e-3,
+        )
+
+
+class TestOCPHybridTwinLaneC:
+
+    @pytest.mark.slow
+    async def test_hybrid_mission_parity(self):
+        sys.path.insert(0, str(EXAMPLES_DIR / "ocp_hybrid_twin"))
+        from ocp_hybrid_twin.lane_a.hybrid_mission import run as lane_a_run
+        from ocp_hybrid_twin.shared import MISSION, PROPULSION
+
+        lane_a = lane_a_run()
+
+        await plan_init(
+            "lane-c-hybrid-twin", plan_id="lane-c-hybrid-twin",
+            name="King Air series-hybrid mission (Lane C tool surface)",
+        )
+        await plan_add_component(
+            "lane-c-hybrid-twin", comp_id="hybrid-mission",
+            comp_type="ocp/FullMission",
+            config=_mission_config(
+                MISSION,
+                template="kingair",
+                architecture=PROPULSION["architecture"],
+                solver_settings=dict(_OCP_NEWTON),
+                extra={
+                    "propulsion_overrides": {
+                        "battery_specific_energy":
+                            PROPULSION["battery_specific_energy"],
+                    },
+                },
+            ),
+        )
+        plan_yaml = await _assemble_and_validate("lane-c-hybrid-twin")
+
+        env = await run_plan(plan_yaml, mode="analysis")
+        summary = _summary(env)
+
+        _print_comparison(
+            "OCP Hybrid Twin Mission (Lane C)", lane_a, summary,
+            keys=["fuel_burn_kg", "OEW_kg", "MTOW_kg"],
+            case="ocp_hybrid_twin", lane_label="C",
+        )
+
+        assert summary["fuel_burn_kg"] == pytest.approx(
+            lane_a["fuel_burn_kg"], rel=1e-3,
+        )
+
+
+class TestOASOCPCombinedLaneC:
+
+    @pytest.mark.slow
+    async def test_wing_mission_parity(self):
+        sys.path.insert(0, str(EXAMPLES_DIR / "oas_ocp_combined"))
+        from oas_ocp_combined.lane_a.wing_mission import run as lane_a_run
+        from oas_ocp_combined.shared import FLIGHT, MISSION, WING
+
+        lane_a = lane_a_run()
+
+        await plan_init(
+            "lane-c-oas-ocp-combined", plan_id="lane-c-oas-ocp-combined",
+            name="Wing aero + Caravan mission composite (Lane C tool surface)",
+        )
+        await plan_add_component(
+            "lane-c-oas-ocp-combined", comp_id="wing",
+            comp_type="oas/AeroPoint",
+            config={"surfaces": [dict(WING)]},
+        )
+        await plan_add_component(
+            "lane-c-oas-ocp-combined", comp_id="mission",
+            comp_type="ocp/BasicMission",
+            config=_mission_config(MISSION, solver_settings=dict(_OCP_NEWTON)),
+        )
+        await plan_set_composition_policy(
+            "lane-c-oas-ocp-combined", policy="explicit"
+        )
+        await plan_set_operating_point(
+            "lane-c-oas-ocp-combined", fields=dict(FLIGHT)
+        )
+        plan_yaml = await _assemble_and_validate("lane-c-oas-ocp-combined")
+
+        env = await run_plan(plan_yaml, mode="analysis")
+        summary = _summary(env)
+
+        wing_c = summary["components"]["wing"]
+        mission_c = summary["components"]["mission"]
+        lane_c_flat = {
+            "wing_CL": wing_c["CL"],
+            "wing_CD": wing_c["CD"],
+            "fuel_burn_kg": mission_c["fuel_burn_kg"],
+            "OEW_kg": mission_c["OEW_kg"],
+            "MTOW_kg": mission_c["MTOW_kg"],
+        }
+
+        _print_comparison(
+            "OAS+OCP Combined (Lane C, uncoupled)", lane_a, lane_c_flat,
+            keys=["wing_CL", "wing_CD", "fuel_burn_kg", "OEW_kg", "MTOW_kg"],
+            case="oas_ocp_combined", lane_label="C",
+        )
+
+        assert lane_c_flat["wing_CL"] == pytest.approx(
+            lane_a["wing_CL"], rel=1e-6,
+        )
+        assert lane_c_flat["wing_CD"] == pytest.approx(
+            lane_a["wing_CD"], rel=1e-6,
+        )
+        assert lane_c_flat["fuel_burn_kg"] == pytest.approx(
+            lane_a["fuel_burn_kg"], rel=1e-3,
+        )
+
+
+class TestOCPOASDirectLaneC:
+
+    @pytest.mark.slow
+    async def test_direct_coupled_mission_parity(self):
+        sys.path.insert(0, str(EXAMPLES_DIR / "ocp_oas_direct"))
+        from ocp_oas_direct.lane_a.direct_coupled_mission import (
+            run as lane_a_run,
+        )
+        from ocp_oas_direct.shared import MISSION, VLM_CONFIG
+
+        lane_a = lane_a_run()
+
+        slots = {
+            "drag": {"provider": "oas/vlm-direct", "config": dict(VLM_CONFIG)},
+        }
+        await plan_init(
+            "lane-c-ocp-oas-direct", plan_id="lane-c-ocp-oas-direct",
+            name="Caravan mission, direct-coupled VLM drag "
+                 "(Lane C tool surface)",
+        )
+        await plan_add_component(
+            "lane-c-ocp-oas-direct", comp_id="mission",
+            comp_type="ocp/BasicMission",
+            config=_mission_config(
+                MISSION, slots=slots,
+                solver_settings={
+                    "solver_type": "newton", "maxiter": 30,
+                    "atol": 1.0e-8, "rtol": 1.0e-8,
+                },
+            ),
+        )
+        plan_yaml = await _assemble_and_validate("lane-c-ocp-oas-direct")
+
+        env = await run_plan(plan_yaml, mode="analysis")
+        summary = _summary(env)
+
+        _print_comparison(
+            "OCP+OAS Direct-Coupled Mission (Lane C)", lane_a, summary,
+            keys=["fuel_burn_kg", "OEW_kg", "MTOW_kg"],
+            case="ocp_oas_direct", lane_label="C",
+        )
+
+        assert summary["fuel_burn_kg"] == pytest.approx(
+            lane_a["fuel_burn_kg"], rel=1e-3,
+        )
+
+
+class TestPyCycleTurbojetLaneC:
+
+    @pytest.mark.slow
+    async def test_turbojet_design_parity(self):
+        sys.path.insert(0, str(EXAMPLES_DIR / "pyc_turbojet"))
+        from pyc_turbojet.lane_a.design_analysis import run as lane_a_run
+        from pyc_turbojet.shared import DESIGN_POINT, ENGINE_PARAMS
+
+        lane_a = lane_a_run()
+
+        await plan_init(
+            "lane-c-pyc-turbojet", plan_id="lane-c-pyc-turbojet",
+            name="Turbojet design point (Lane C tool surface)",
+        )
+        await plan_add_component(
+            "lane-c-pyc-turbojet", comp_id="turbojet",
+            comp_type="pyc/TurbojetDesign", config=dict(ENGINE_PARAMS),
+        )
+        await plan_set_operating_point(
+            "lane-c-pyc-turbojet", fields=dict(DESIGN_POINT)
+        )
+        plan_yaml = await _assemble_and_validate("lane-c-pyc-turbojet")
+
+        env = await run_plan(plan_yaml, mode="analysis")
+        summary = _summary(env)
+
+        _print_comparison(
+            "pyCycle Turbojet Design Point (Lane C)", lane_a, summary,
+            keys=["Fn", "TSFC", "OPR"],
+            case="pyc_turbojet", lane_label="C",
+        )
+
+        assert summary["Fn"] == pytest.approx(lane_a["Fn"], rel=1e-6)
+        assert summary["TSFC"] == pytest.approx(lane_a["TSFC"], rel=1e-6)
+        assert summary["OPR"] == pytest.approx(lane_a["OPR"], rel=1e-6)
+
+
+class TestOCPThreeToolLaneC:
+
+    @pytest.mark.slow
+    async def test_coupled_mission_parity(self):
+        sys.path.insert(0, str(EXAMPLES_DIR / "ocp_three_tool"))
+        from ocp_three_tool.lane_a.coupled_mission import run as lane_a_run
+        from ocp_three_tool.shared import MISSION, PYC_SURR_CONFIG, VLM_CONFIG
+
+        lane_a = lane_a_run()
+
+        slots = {
+            "drag": {"provider": "oas/vlm", "config": dict(VLM_CONFIG)},
+            "propulsion": {
+                "provider": "pyc/surrogate", "config": dict(PYC_SURR_CONFIG),
+            },
+        }
+        await plan_init(
+            "lane-c-ocp-three-tool", plan_id="lane-c-ocp-three-tool",
+            name="B738 three-tool mission (Lane C tool surface)",
+        )
+        await plan_add_component(
+            "lane-c-ocp-three-tool", comp_id="mission",
+            comp_type="ocp/BasicMission",
+            config=_mission_config(
+                MISSION, slots=slots,
+                template="b738", architecture="twin_turbofan",
+                # NLBGS: dual-surrogate coupling leaves Newton ill-conditioned.
+                solver_settings={
+                    "solver_type": "nlbgs", "maxiter": 200,
+                    "atol": 1.0e-8, "rtol": 1.0e-8,
+                },
+            ),
+        )
+        plan_yaml = await _assemble_and_validate("lane-c-ocp-three-tool")
+
+        env = await run_plan(plan_yaml, mode="analysis")
+        summary = _summary(env)
+
+        _print_comparison(
+            "OCP Three-Tool B738 Mission (Lane C)", lane_a, summary,
+            keys=["fuel_burn_kg", "OEW_kg", "MTOW_kg"],
+            case="ocp_three_tool", lane_label="C",
+        )
+
+        assert summary["fuel_burn_kg"] == pytest.approx(
+            lane_a["fuel_burn_kg"], rel=1e-3,
+        )
 
 
 # ── Aviary (subprocess factory into .venv-avy) ───────────────────────────

@@ -28,36 +28,12 @@
 %      packages/sdk/src/hangar/sdk/provenance/tools.py   (agent-authored tools)
 %      packages/sdk/src/hangar/sdk/provenance/conclusion.py (auto verdicts)
 % =====================================================================
-\documentclass[border=10pt]{standalone}
 
-\usepackage{xcolor}
-\usepackage{tikz}
-\usetikzlibrary{arrows.meta, positioning, shapes.geometric, fit, backgrounds, calc}
+\begin{figure*}[t]
+\centering
 
-% --- palette: muted grayscale base + conventional PROV class colours ---
-\definecolor{ink}{HTML}{1A1A1A}
-\definecolor{edge}{HTML}{404040}
-\definecolor{muted}{HTML}{6B6B6B}
-\definecolor{entfill}{HTML}{FBF3D3}   % PROV entity   — soft yellow
-\definecolor{entline}{HTML}{9C8B33}
-\definecolor{actfill}{HTML}{DDE7F7}   % PROV activity — soft blue
-\definecolor{actline}{HTML}{3F6FB0}
-\definecolor{agtfill}{HTML}{FBE1C0}   % PROV agent    — soft orange
-\definecolor{agtline}{HTML}{BE843A}
-
-% --- in-node text switches (declarations, used inside node braces) ----
-\newcommand{\nhead}{\normalfont\sffamily\bfseries}
-\newcommand{\nattr}{\normalfont\ttfamily\scriptsize\color{muted}}
-
-% --- output size: ONE knob. Rescales the whole figure (shapes + text)
-%     uniformly. Native width is ~8.4in; 0.75 emits ~6.3in so the PDF sits
-%     inside a single-column text block. Set 1.0 for full size, or size it
-%     at include time instead: \includegraphics[width=\linewidth]{...}.
-\newcommand{\figscale}{0.75}
-
-\begin{document}
 \begin{tikzpicture}[
-    scale=\figscale, transform shape,
+    scale=0.75, transform shape,
     font=\sffamily,
     >=Stealth,
     % --- PROV class shapes ------------------------------------------
@@ -172,4 +148,7 @@
  \textit{each row's monotonic \texttt{seq} order.}};
 
 \end{tikzpicture}
-\end{document}
+
+\caption{Layer~1 --- the \texttt{@capture\_tool} session-graph ontology, in W3C PROV notation.}
+\label{fig:session-graph-ontology}
+\end{figure*}

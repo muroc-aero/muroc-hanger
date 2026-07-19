@@ -1524,14 +1524,17 @@ def _record_assessment(
     }
     if recorder_info:
         assess_meta["case_count"] = recorder_info.get("case_count", 0)
-    # Pull key scalars from summary (OAS)
-    for key in ("CL", "CD", "L_over_D"):
-        if key in summary:
-            assess_meta[key] = summary[key]
-    # OCP scalars
-    for key in ("fuel_burn_kg", "OEW_kg", "MTOW_kg", "TOFL_m", "battery_SOC_final"):
-        if key in summary:
-            assess_meta[key] = summary[key]
+    # Snapshot every scalar summary metric. An allowlist here (formerly the
+    # OAS + OCP keys only) silently dropped other families' metrics --
+    # pyCycle's Fn/TSFC/OPR and evt's sized_mtow_kg never reached the
+    # assessment entity, so acceptance criteria and provenance readers could
+    # not resolve them (the vocabulary gap _conclusion_metric_data works
+    # around). `status`/`mode`/`case_count` stay authoritative over summary.
+    for key, val in summary.items():
+        if key in assess_meta:
+            continue
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            assess_meta[key] = val
     # Slot results
     if "slots" in summary:
         assess_meta["slots"] = summary["slots"]

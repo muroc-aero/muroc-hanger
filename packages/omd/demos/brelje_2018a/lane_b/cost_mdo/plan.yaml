@@ -1,0 +1,96 @@
+# Lane B: Brelje 2018a Fig 6 single-cell MDO -- minimize trip DOC per nmi.
+#
+# Identical problem to fuel_mdo/plan.yaml (same DVs, constraints, and
+# paper-specific initial values -- see that file's header) except the OCP
+# component wires in the cost model (include_cost_model) and the objective
+# is doc_per_nmi instead of mixed_objective. pipeline/sweep.py patches
+# mission_range_NM and battery_specific_energy per grid cell and typically
+# warm-starts these cells from the fig5 fuel grid (--warm-from).
+#
+#   uv run omd-cli run packages/omd/demos/brelje_2018a/lane_b/cost_mdo/plan.yaml --mode optimize
+
+metadata:
+  id: brelje-2018a-cost-mdo
+  name: "Brelje 2018a Fig 6: King Air series-hybrid min trip-DOC MDO"
+  version: 1
+  description: >
+    Single-cell reproduction of the Brelje & Martins 2018 (AIAA/IEEE EATS)
+    Fig 6 MDO: King Air C90GT series-hybrid retrofit, minimizing trip direct
+    operating cost per nautical mile over the full MDO design-variable set
+    at one (design range, battery specific energy) grid point.
+
+operating_points: {}
+
+components:
+- id: mission
+  type: ocp/FullMission
+  config:
+    aircraft_template: kingair
+    architecture: twin_series_hybrid
+    num_nodes: 11
+    include_cost_model: true
+    propulsion_overrides:
+      battery_specific_energy: 450.0
+    mission_params:
+      cruise_altitude_ft: 29000.0
+      mission_range_NM: 500.0
+      climb_vs_ftmin: 1500.0
+      climb_Ueas_kn: 124.0
+      cruise_Ueas_kn: 170.0
+      descent_vs_ftmin: 600.0
+      descent_Ueas_kn: 140.0
+      payload_lb: 1000.0
+      battery_specific_energy: 450.0
+      # Starting guesses: cruise from HybridTwin.py:250; climb/descent kept
+      # off 0.0 so the starting point is inside the DV bounds.
+      cruise_hybridization: 0.05840626452293813
+      climb_hybridization: 0.05
+      descent_hybridization: 0.05
+
+design_variables:
+- {name: "ac|weights|MTOW",                lower: 4000.0, upper: 5700.0, units: kg}
+- {name: "ac|geom|wing|S_ref",             lower: 15.0,   upper: 40.0,   units: m**2}
+- {name: "ac|propulsion|engine|rating",    lower: 1.0,    upper: 3000.0, units: hp, initial: 1117.2}
+- {name: "ac|propulsion|motor|rating",     lower: 450.0,  upper: 3000.0, units: hp}
+- {name: "ac|propulsion|generator|rating", lower: 1.0,    upper: 3000.0, units: hp}
+- {name: "ac|weights|W_battery",           lower: 20.0,   upper: 2250.0, units: kg}
+- {name: "ac|weights|W_fuel_max",          lower: 500.0,  upper: 3000.0, units: kg}
+- {name: cruise.hybridization,             lower: 0.001,  upper: 0.999}
+- {name: climb.hybridization,              lower: 0.001,  upper: 0.999}
+- {name: descent.hybridization,            lower: 0.01,   upper: 1.0}
+
+# Paper-specific modifications of the stock King Air for the series-hybrid
+# architecture (HybridTwin.py:243-245); without these the MDO converges in
+# a different basin (~25 % lighter aircraft, more electric optima).
+initial_values:
+- {name: analysis.cruise.acmodel.OEW.const.structural_fudge, val: 2.0}
+- {name: "ac|propulsion|propeller|diameter", val: 2.2, units: m}
+
+constraints:
+# scalar
+- {name: margins.MTOW_margin,               lower: 0.0}
+- {name: rotate.range_final,                upper: 1357.0}   # BFL, ft
+- {name: v0v1.Vstall_eas,                   upper: 42.0}     # kn EAS
+- {name: descent.propmodel.batt1.SOC_final, lower: 0.0}
+- {name: engineoutclimb.gamma,              lower: 0.02}
+# vector, shaped (num_nodes,) -- scalar bounds broadcast across the vector
+- {name: climb.throttle,                                 upper: 1.05}
+- {name: climb.propmodel.eng1.component_sizing_margin,   upper: 1.0}
+- {name: climb.propmodel.gen1.component_sizing_margin,   upper: 1.0}
+- {name: climb.propmodel.batt1.component_sizing_margin,  upper: 1.0}
+- {name: cruise.propmodel.eng1.component_sizing_margin,  upper: 1.0}
+- {name: cruise.propmodel.gen1.component_sizing_margin,  upper: 1.0}
+- {name: cruise.propmodel.batt1.component_sizing_margin, upper: 1.0}
+- {name: descent.propmodel.eng1.component_sizing_margin, upper: 1.0}
+- {name: descent.propmodel.gen1.component_sizing_margin, upper: 1.0}
+- {name: descent.propmodel.batt1.component_sizing_margin, upper: 1.0}
+- {name: v0v1.propmodel.batt1.component_sizing_margin,   upper: 1.0}
+
+objective:
+  name: doc_per_nmi
+
+optimizer:
+  type: SLSQP
+  options:
+    tol: 1.0e-6
+    maxiter: 150

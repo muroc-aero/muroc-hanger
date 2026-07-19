@@ -1,6 +1,8 @@
-# LaTeX transient build artifacts (the .pdf figures are committed deliverables)
+# LaTeX transient build artifacts (the per-figure .pdf renders are committed
+# deliverables; _preview.pdf is a throwaway multi-figure build)
 *.aux
 *.log
 *.out
 *.png
 *.synctex.gz
+_preview.pdf

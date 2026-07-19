@@ -52,6 +52,32 @@ def _warn_if_unauthenticated(host: str, port: int, tool: str) -> None:
     )
 
 
+def _widen_allowed_hosts(mcp) -> None:
+    """Admit extra Host header values from ``HANGAR_MCP_EXTRA_ALLOWED_HOSTS``.
+
+    FastMCP freezes a localhost-only DNS-rebinding allowlist at construction
+    when binding loopback, so a client that reaches the loopback bind through
+    a forwarder under another name (a container using ``host.docker.internal``)
+    is rejected with 421 Misdirected Request. The env var is a comma-separated
+    list of Host values (``:*`` port wildcards allowed). Must run before
+    ``streamable_http_app()`` lazily builds the session manager.
+    """
+    extra = [
+        h.strip()
+        for h in os.environ.get("HANGAR_MCP_EXTRA_ALLOWED_HOSTS", "").split(",")
+        if h.strip()
+    ]
+    security = mcp.settings.transport_security
+    if not extra or security is None:  # None: non-loopback bind, guard is off
+        return
+    security.allowed_hosts.extend(
+        h for h in extra if h not in security.allowed_hosts
+    )
+    security.allowed_origins.extend(
+        o for h in extra if (o := f"http://{h}") not in security.allowed_origins
+    )
+
+
 def run_server_main(
     mcp,
     *,
@@ -159,6 +185,7 @@ def run_server_main(
     from hangar.sdk.viz.viewer_routes import build_viewer_app
 
     _warn_if_unauthenticated(args.host, args.port, tool)
+    _widen_allowed_hosts(mcp)
     mcp_asgi = mcp.streamable_http_app()
     viewer_app, auth_mode = build_viewer_app()
 
