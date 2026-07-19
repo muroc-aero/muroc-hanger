@@ -391,11 +391,28 @@ async def main() -> int:
     parser.add_argument("--save-json", type=Path, default=None,
                         help="Write per-case scored results to this JSON file "
                              "(consumed by paper/make_tables.py)")
+    parser.add_argument("--resume", action="store_true",
+                        help="Skip cases already present in --save-json "
+                             "(reuse their saved rows)")
     args = parser.parse_args()
 
     names = list(CASES) if "all" in args.cases else list(dict.fromkeys(args.cases))
     all_ok = True
     saved: list[dict] = []
+
+    if args.resume and args.save_json and args.save_json.exists():
+        saved = json.loads(args.save_json.read_text())
+        done = {row["case"] for row in saved}
+        skipped = [n for n in names if n in done]
+        names = [n for n in names if n not in done]
+        all_ok = all(row.get("ok") for row in saved)
+        if skipped:
+            print(f"Resuming: reusing saved results for {', '.join(skipped)}")
+
+    def _checkpoint() -> None:
+        if args.save_json:
+            args.save_json.parent.mkdir(parents=True, exist_ok=True)
+            args.save_json.write_text(json.dumps(saved, indent=2) + "\n")
 
     for name in names:
         case = CASES[name]
@@ -408,9 +425,20 @@ async def main() -> int:
         tmp = Path(tempfile.mkdtemp(prefix=f"lane_c_eval_{name}_"))
         print(f"  omd data root: {tmp}")
         print("  Running blind agent (omd MCP tools only)...")
-        text, cost = await run_agent(
-            build_prompt(case), tmp, args.model, args.max_turns, args.verbose,
-        )
+        try:
+            text, cost = await run_agent(
+                build_prompt(case), tmp, args.model, args.max_turns,
+                args.verbose,
+            )
+        except Exception as exc:  # noqa: BLE001 - SDK/CLI errors must not
+            # kill the remaining cases; record and move on.
+            print(f"  ERROR: agent run failed: {exc}")
+            all_ok = False
+            saved.append({"case": name, "model": args.model, "ok": False,
+                          "error": f"agent run failed: {exc}",
+                          "cost_usd": None, "metrics": []})
+            _checkpoint()
+            continue
         if cost is not None:
             print(f"  Agent cost: ${cost:.4f}")
 
@@ -421,6 +449,7 @@ async def main() -> int:
             all_ok = False
             saved.append({"case": name, "model": args.model, "ok": False,
                           "error": str(exc), "cost_usd": cost, "metrics": []})
+            _checkpoint()
             continue
 
         print(f"  plan_id={report.get('plan_id')}  "
@@ -434,14 +463,14 @@ async def main() -> int:
             "status": report.get("status"), "cost_usd": cost,
             "friction": report.get("friction") or [], "metrics": rows,
         })
+        _checkpoint()
 
         if not args.keep_data:
             import shutil
             shutil.rmtree(tmp, ignore_errors=True)
 
     if args.save_json:
-        args.save_json.parent.mkdir(parents=True, exist_ok=True)
-        args.save_json.write_text(json.dumps(saved, indent=2) + "\n")
+        _checkpoint()
         print(f"\nSaved scored results to {args.save_json}")
 
     print(f"\n{'=' * 70}\nOverall: {'PASS' if all_ok else 'FAIL'}\n{'=' * 70}")
