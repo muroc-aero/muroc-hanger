@@ -19,7 +19,7 @@ Three paths, in increasing infrastructure order:
 |------|-----------|------|-------|
 | A | scripted lanes A/B/C + the live-agent Lane C column | the-hangar | dev setup; Claude Code CLI for the agent column |
 | B | model x harness eval cells (anchor, sandboxed, local models) | hangar-evals | path A's setup + hangar-evals install; Docker/Ollama per arm |
-| C | a governed study over eval cells | have-agent | paths A+B plus the eval bridge (planned -- see below) |
+| C | a governed study over eval cells | have-agent | paths A+B plus have-agent as a sibling |
 
 All the-hangar commands run from the the-hangar repo root; all
 hangar-evals commands from the hangar-evals repo root.
@@ -165,7 +165,7 @@ Evals read the live the-hangar working tree. Don't switch branches or edit
 case content mid-sweep; the `_config.json` environment block records both
 repos' git SHAs and dirty flags -- check it before citing numbers.
 
-## Path C -- a have-agent study over eval cells (planned)
+## Path C -- a have-agent study over eval cells
 
 The sibling `have-agent` repo is a study substrate: a StudyRequest YAML is
 decomposed into ANALYSIS+CHECK jobs in SQLite, pull workers execute them
@@ -175,31 +175,50 @@ review inbox, and a REPORT job publishes a markdown briefing. It already
 runs omd *plan* studies against this repo today (`--executor hangar`; see
 have-agent's README, "Real runs against the-hangar").
 
-Running *eval* cells (path B) under a have-agent study needs a small
-bridge that does not exist yet:
+Eval cells (path B) plug in through two pieces that exist on both sides:
 
-1. **have-agent:** accept a dotted-path executor/check-suite alongside the
-   built-in `fake`/`hangar` choices.
-2. **hangar-evals:** a `have_bridge` module -- an `Executor` that runs one
-   eval seed per job via `run_cell` (job payload: case, harness, model,
-   seed) and a `CheckSuite` that folds the graded record into a
-   pass/warn/fail verdict -- plus an example StudyRequest whose `cases:`
-   list enumerates the case x harness x model x seed cells.
+1. **have-agent:** `--executor pkg.module:factory` loads a dotted-path
+   plugin alongside the built-in `fake`/`hangar` choices;
+   `--executor-opt KEY=VALUE` flags reach the factory (DECISIONS #32).
+2. **hangar-evals:** `hangar.evals.have_bridge` -- `make_worker` returns an
+   `Executor` that runs one eval *cell* (case x harness x model, N seeds)
+   per ANALYSIS job through `run_matrix`, and a `CheckSuite` that folds the
+   cell summary into a pass/warn/fail verdict against the study's
+   `acceptance.min_pass_rate`. `examples/lane_c_eval.yaml` is the full
+   12-case suite on the claude anchor arm.
 
-The intended flow, once the bridge lands (commands illustrative until then):
+### C1. Run the full suite as a governed study
+
+From the hangar-evals repo root (the-hangar and have-agent as siblings; the
+worker interpreter needs all three -- the-hangar's project env because Lane A
+references are computed in-process, have-agent for the CLI, and
+hangar-evals with the `[anchor]` extra for the Claude driver):
 
 ```bash
-cd ../have-agent
-uv run have --db muroc.db submit examples/lane_c_eval.yaml
-uv run have --db muroc.db approve <study_id>
-uv run --project ../the-hangar --with ../have-agent --with ../hangar-evals \
-  have --db muroc.db worker run --id worker:evals-1 \
-  --executor hangar.evals.have_bridge:make_executor
-uv run have --db muroc.db status <study_id>
-uv run have --db muroc.db report <study_id>
+cd ../hangar-evals
+HAVE="uv run --project ../the-hangar --with ../have-agent --with-editable .[anchor]"
+$HAVE have --db muroc.db submit examples/lane_c_eval.yaml
+$HAVE have --db muroc.db approve <study_id>
+$HAVE have --db muroc.db worker run --id worker:evals-1 --solvers evals \
+    --executor hangar.evals.have_bridge:make_worker \
+    --executor-opt results_dir=results
+$HAVE have --db muroc.db status <study_id>
+$HAVE have --db muroc.db report <study_id>
 ```
 
-The bridge executor keeps writing standard hangar-evals results files, so
-path B3 (the paper table) is unchanged -- have-agent adds leases, retries,
-gating, the review inbox, and the study briefing on top without becoming a
-second source of truth for scores.
+`--solvers evals` matches the study template's `evals/` prefix -- a worker
+registered with other solvers never claims these jobs. Sandboxed cells: add
+`--executor-opt omd_transport=http --executor-opt sandbox=container` (or
+set the same keys per case in the YAML).
+
+### C2. Semantics worth knowing
+
+- An agent that runs cleanly but **fails the eval is a successful job** with
+  a failing CHECK verdict -- policy gates and the review inbox see grades,
+  triage sees infrastructure failures. Harness crashes fail the job
+  retryably (`policy.auto_retry_max`); malformed payloads fail permanently.
+- The bridge executor keeps writing standard hangar-evals results files
+  (timestamp-stamped, so `make_tables.py`'s latest-per-cell selection still
+  works), so path B3 (the paper table) is unchanged -- have-agent adds
+  leases, retries, gating, the review inbox, and the study briefing on top
+  without becoming a second source of truth for scores.
