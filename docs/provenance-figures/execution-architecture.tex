@@ -1,0 +1,153 @@
+% =====================================================================
+%  Hangar architecture — the omd execution / composition pipeline
+% ---------------------------------------------------------------------
+%  A `figure*` float meant to be \input into a paper. The shared TikZ
+%  libraries, colour palette, and text macros live in _preamble.tex; see
+%  _preview.tex for a standalone build driver.
+%
+%  Unlike the four provenance/data-model figures in this directory, this
+%  is a SYSTEM ARCHITECTURE diagram (not a PROV or UML data model): it
+%  shows how a declarative plan becomes a single solved, multi-tool
+%  OpenMDAO problem, and where the provenance record (the other figures)
+%  comes from.
+%
+%  Notation: pentagon = agent (orange), rounded rect = pipeline stage /
+%  software (blue), rounded rect = leaf analysis tool (green), rectangle
+%  = data artifact (yellow), cylinder = datastore (yellow). Solid edges
+%  are data / control flow; dashed edges are registry dispatch / factory
+%  resolution.
+%
+%  Source of truth for the pipeline + registry + slots:
+%      packages/omd/src/hangar/omd/run.py            load → materialize → run → record
+%      packages/omd/src/hangar/omd/materializer.py   plan → OpenMDAO Problem
+%      packages/omd/src/hangar/omd/registry.py       _FACTORIES + plot providers
+%      packages/omd/src/hangar/omd/slots.py          slot provider registry (composition)
+%      packages/omd/src/hangar/omd/factories/        oas / oas_aero / pyc / evt / paraboloid
+%      packages/omd/CLAUDE.md                        "Data flow: run" + slots tables
+% =====================================================================
+
+\begin{figure*}[t]
+\centering
+
+\begin{tikzpicture}[
+    scale=0.66, transform shape,
+    font=\sffamily,
+    >=Stealth,
+    agent/.style={
+        regular polygon, regular polygon sides=5, draw=agtline,
+        line width=0.9pt, fill=agtfill, text=ink, inner sep=1pt,
+        align=center, font=\sffamily\small, minimum width=22mm},
+    stage/.style={
+        rounded corners=2pt, draw=actline, line width=0.9pt, fill=actfill,
+        text=ink, align=center, inner sep=3pt, font=\sffamily\small,
+        minimum width=26mm, minimum height=12mm},
+    problem/.style={stage, line width=1.4pt, minimum width=34mm,
+        minimum height=17mm, font=\sffamily\small\bfseries},
+    tool/.style={
+        rounded corners=2pt, draw=toolline, line width=0.9pt, fill=toolfill,
+        text=ink, align=center, inner sep=3pt, font=\sffamily\small,
+        minimum width=30mm, minimum height=13mm},
+    artifact/.style={
+        draw=entline, line width=0.9pt, fill=entfill, text=ink,
+        align=center, inner sep=3pt, font=\sffamily\small,
+        minimum width=28mm, minimum height=14mm},
+    store/.style={
+        cylinder, shape border rotate=90, aspect=0.28, draw=entline,
+        line width=0.8pt, fill=entfill, text=ink, align=center,
+        inner sep=1pt, font=\sffamily\scriptsize,
+        minimum width=22mm, minimum height=12mm},
+    flow/.style={->, line width=0.9pt, draw=edge},
+    disp/.style={->, line width=0.8pt, draw=muted, densely dashed},
+    rlab/.style={font=\sffamily\scriptsize\itshape, text=ink,
+                 fill=white, inner sep=1.4pt, align=center},
+    reg/.style={stage, densely dashed, minimum width=40mm, minimum height=12mm},
+]
+
+% ---- top lane: agent + surface -------------------------------------
+\node[agent] (agent)   at (0.7,6.4) {coding\\agent};
+\node[stage] (surface) at (4.9,6.4) {omd surface\\[-1pt]\nattr MCP server $\cdot$ omd-cli};
+
+% ---- data artifact: the plan --------------------------------------
+\node[artifact] (plan) at (0.7,3.6)
+    {plan.yaml\\[-1pt]\nattr components $\cdot$ op\_point\\[-2pt]\nattr slots $\cdot$ DVs $\cdot$ objective};
+
+% ---- runner pipeline (run.py) -------------------------------------
+\node[stage]   (valid) at (5.1,3.6)  {load \&\\validate};
+\node[stage]   (mat)   at (9.4,3.6)  {materialize};
+\node[problem] (prob)  at (14.0,3.6) {OpenMDAO\\Problem};
+\node[stage]   (rec)   at (18.4,3.6) {record};
+
+% ---- registry (factory + slots) -----------------------------------
+\node[reg] (reg) at (9.4,1.2) {factory + slot registry\\[-1pt]\nattr \_FACTORIES $\cdot$ slot providers};
+
+% ---- leaf analysis tools ------------------------------------------
+\node[tool] (oas) at (2.6,-1.4)  {OpenAeroStruct\\[-1pt]\nattr AeroPoint $\cdot$ Aerostruct};
+\node[tool] (ocp) at (7.4,-1.4)  {OpenConcept\\[-1pt]\nattr missions};
+\node[tool] (pyc) at (11.9,-1.4) {pyCycle\\[-1pt]\nattr turbojet $\cdot$ HBTF};
+\node[tool] (evt) at (16.2,-1.4) {evt (native)\\[-1pt]\nattr sizing $\cdot$ mission};
+\begin{scope}[on background layer]
+\node[draw=toolline, line width=0.5pt, densely dotted, rounded corners=3pt,
+      fill=toolfill!25, inner sep=5mm, fit=(oas)(ocp)(pyc)(evt)] (tools) {};
+\end{scope}
+\node[anchor=south west, font=\sffamily\scriptsize\itshape, text=toolline]
+      at ([xshift=1mm]tools.north west) {leaf analysis tools};
+\coordinate (disp_in) at ($(tools.north west)!0.34!(tools.north east)$);
+\coordinate (sub_out) at ($(tools.north west)!0.66!(tools.north east)$);
+
+% ---- datastores ---------------------------------------------------
+\node[store] (sql) at (21.4,5.2) {recorder\\.sql};
+\node[store] (db)  at (21.4,3.6) {analysis.db\\[-1pt]\nattr PROV-Agent};
+\node[store] (n2)  at (21.4,2.0) {n2/*.html};
+\node[store] (plt) at (21.4,0.4) {plots/*.png};
+
+% ---- edges: main dataflow -----------------------------------------
+\draw[flow] (agent)   -- node[rlab,left]{drives} (surface);
+\draw[flow] (surface) -- node[rlab,right]{assemble\\write\_plan} (plan);
+\draw[flow] (plan)  -- (valid);
+\draw[flow] (valid) -- (mat);
+\draw[flow] (mat)   -- node[rlab,above]{builds} (prob);
+\draw[flow] (prob)  -- node[rlab,above]{run\_driver} (rec);
+
+% registry resolves factories for materialize; dispatches to tools
+\draw[disp] (reg.north) -- node[rlab,right]{resolve} (mat.south);
+\draw[disp] (reg.south) to[out=-90,in=90] node[rlab,pos=0.5,left]{dispatch} (disp_in);
+
+% tools compose into the one Problem
+\draw[flow] (sub_out) to[out=90,in=-90] node[rlab,pos=0.55,right]{subsystems} (prob.south);
+
+% record writes the stores
+\draw[flow] (rec.east) to[out=0,in=180] (sql.west);
+\draw[flow] (rec.east) -- (db.west);
+\draw[flow] (rec.east) to[out=0,in=180] (n2.west);
+\draw[flow] (rec.east) to[out=0,in=180] (plt.west);
+
+% =====================================================================
+%  legends
+% =====================================================================
+\node[anchor=north west, align=left, font=\sffamily\scriptsize, text=ink,
+      draw=muted, line width=0.5pt, fill=white, rounded corners=2pt,
+      inner sep=6pt] at (-3.6,-3.6)
+{\textbf{node roles}\\[3pt]
+ \tikz\node[agent,scale=0.35,minimum width=22mm]{};\ agent \quad
+ \tikz\node[stage,scale=0.5,minimum width=14mm,minimum height=7mm]{};\ pipeline stage \\[3pt]
+ \tikz\node[tool,scale=0.5,minimum width=14mm,minimum height=7mm]{};\ leaf analysis tool \quad
+ \tikz\node[artifact,scale=0.5,minimum width=14mm,minimum height=7mm]{};\ data artifact \\[3pt]
+ \tikz\node[store,scale=0.5,minimum width=12mm,minimum height=7mm]{};\ datastore};
+
+\node[anchor=north west, align=left, font=\sffamily\scriptsize, text=ink,
+      draw=muted, line width=0.5pt, fill=white, rounded corners=2pt,
+      inner sep=6pt] at (9.4,-3.6)
+{\textbf{edges}\\[3pt]
+ \tikz\draw[flow](0,0)--(0.55,0);\ data / control flow \qquad
+ \tikz\draw[disp](0,0)--(0.55,0);\ registry dispatch / factory resolution\\[4pt]
+ \textbf{composition:}\ a single \texttt{component} may fill \emph{slots} with
+ more than one tool\\ (e.g.\ OpenConcept mission + OpenAeroStruct VLM drag),
+ materialized into one OpenMDAO model.};
+
+\end{tikzpicture}
+
+\caption{\texttt{omd} execution architecture: a declarative plan is materialized
+into a single OpenMDAO problem that composes the leaf analysis tools through a
+factory / slot registry, then run and recorded with PROV-Agent provenance.}
+\label{fig:execution-architecture}
+\end{figure*}

@@ -1,0 +1,36 @@
+% =====================================================================
+%  Preview / verification driver for the figure floats in this directory.
+% ---------------------------------------------------------------------
+%  The figures are `figure*` floats meant for \input into a paper. This
+%  driver renders every one of them, in order, on its own page so the
+%  set can be eyeballed without a full paper build:
+%
+%      tectonic -X compile _preview.tex        # -> _preview.pdf
+%      # or: pdflatex _preview.tex
+%
+%  It neutralises the float wrapper (\begin{figure*} .. \caption .. )
+%  into a plain centered block so nothing floats to the end of the
+%  document; the figure BODIES are rendered exactly as in the paper.
+% =====================================================================
+\documentclass[11pt]{article}
+\usepackage[paperwidth=13in, paperheight=9in, margin=0.5in]{geometry}
+\usepackage{tikz}
+\usepackage{xcolor}
+\input{_preamble}
+\pagestyle{empty}
+
+% Turn each float into an in-place centered block for preview.
+\renewenvironment{figure*}[1][]{\par\begin{center}}{\end{center}\clearpage}
+\renewenvironment{figure}[1][]{\par\begin{center}}{\end{center}\clearpage}
+\renewcommand{\caption}[1]{\par\smallskip\begin{minipage}{0.8\linewidth}%
+  \small\itshape #1\end{minipage}}
+\renewcommand{\label}[1]{}
+
+\begin{document}
+\input{prov-metamodel-ontology}
+\input{session-graph-ontology}
+\input{omd-provagent-ontology}
+\input{plan-dag-ontology}
+\input{execution-architecture}
+\input{ocp-oas-plan-listing}
+\end{document}

@@ -1,0 +1,54 @@
+% =====================================================================
+%  Listing — the OCP + OAS multi-tool plan (VLM drag slot)
+% ---------------------------------------------------------------------
+%  A `figure` float meant to be \input into a paper. Requires the shared
+%  _preamble.tex (which loads `listings` and defines the `planyaml`
+%  style). This is the concrete plan materialized by the
+%  execution-architecture pipeline (Fig.~\ref{fig:execution-architecture}):
+%  one `ocp/BasicMission` component whose drag slot is filled by an
+%  OpenAeroStruct VLM wing — an OpenConcept mission and an OAS aero model
+%  composed into a single OpenMDAO problem by one declarative plan.
+%
+%  Verbatim source (content_hash elided to fit the column):
+%      packages/omd/tests/fixtures/assembled/ocp_vlm_drag_slot_v1.yaml
+% =====================================================================
+
+\begin{figure}[t]
+\centering
+\begin{lstlisting}[style=planyaml]
+metadata:
+  id: plan-ocp-vlm-drag-slot
+  name: OCP Caravan mission with VLM drag slot
+  version: 1
+  content_hash: ff09fc96...6a32fe2b8    # sha256, elided
+operating_points: {}
+components:
+- id: mission
+  type: ocp/BasicMission
+  config:
+    aircraft_template: caravan
+    architecture: turboprop
+    num_nodes: 11
+    mission_params:
+      cruise_altitude_ft: 18000.0
+      mission_range_NM: 250.0
+      climb_vs_ftmin: 850.0
+      climb_Ueas_kn: 104.0
+      cruise_Ueas_kn: 129.0
+      descent_vs_ftmin: 400.0
+      descent_Ueas_kn: 100.0
+    slots:
+      drag:
+        provider: oas/vlm
+        config:
+          num_x: 2
+          num_y: 7
+          num_twist: 4
+\end{lstlisting}
+\caption{A multi-tool \texttt{omd} plan. One \texttt{ocp/BasicMission} component
+runs a Cessna~208 Caravan mission (OpenConcept); its \texttt{drag} \emph{slot}
+is filled by an OpenAeroStruct VLM wing (\texttt{provider: oas/vlm}), so the two
+tools are composed into a single OpenMDAO problem by one declarative plan. The
+64-character \texttt{content\_hash} is elided.}
+\label{fig:ocp-oas-plan}
+\end{figure}
