@@ -8,9 +8,18 @@ Each example runs the same analysis three different ways:
 | **Lane B** | omd plan YAML + `omd-cli` (pre-built reference plans) | `lane_b/*/` plan directories |
 | **Lane C** | Agent task prompts (agent creates the plan from scratch) | `lane_c/*.prompt.md` |
 
-Lane C prompts describe *what* to analyze, not *how*. The agent uses
-`/omd-cli-guide` or `omd-cli --help` to learn how to author plan YAML
-files, creates the plan, runs it via `omd-cli`, and reports results.
+Lane C prompts describe *what* to analyze, not *how*. Each example has
+two flavors:
+
+- `lane_c/<name>.prompt.md` -- guided: names the component type, config
+  keys, and CLI deliverables. For a human (or agent) driving `omd-cli`
+  with the `/omd-cli-guide` skill available.
+- `lane_c/<name>_open.prompt.md` -- open: states the engineering goal
+  and the physical inputs only. It deliberately names no factory, slot
+  provider, parameter key, or tool-call sequence; the agent must work
+  out the workflow from the server's own affordances (tool
+  descriptions, `omd://reference`). The blind agent eval uses these.
+
 The agent's output should match Lane A and Lane B.
 
 ## Examples
@@ -62,7 +71,9 @@ Lane C parity is covered in two stages:
 1. **Scripted (CI)** -- `tests/test_parity_lane_c.py` drives the same
    MCP tool functions an agent uses (plan_init -> plan_add_component ->
    assemble_plan -> validate_plan -> run_plan -> get_results) in
-   process and compares against Lane A.
+   process and compares against Lane A. Covers every parity case except
+   `ocp_pyc_coupled` (a documented Lane B/C gap -- see that example's
+   TODO.md).
 2. **Agent eval (manual / automatable)** -- `agent_eval/eval_lane_c.py`
    launches a blind agent through the Claude Agent SDK, restricted to
    the omd MCP tools, and scores its reported metrics against Lane A.
